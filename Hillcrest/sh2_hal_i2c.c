@@ -88,8 +88,8 @@ typedef struct {
     uint8_t rxBuf[SH2_HAL_MAX_TRANSFER];
     uint16_t rxRemaining;
     SemaphoreHandle_t blockSem;
-} Sh2_t;
-Sh2_t sh2[SH2_UNITS];
+} Sh2Hal_t;
+Sh2Hal_t sh2Hal;
 
 typedef enum {
     EVT_INTN,
@@ -98,7 +98,6 @@ typedef enum {
 typedef struct {
     uint32_t t_ms;
     EventId_t id;
-    unsigned unit;
 } Event_t;
 
 // ----------------------------------------------------------------------------------
@@ -113,21 +112,18 @@ void sh2_hal_init(I2C_HandleTypeDef* _hi2c)
     // Need to init I2C peripheral before first use.
     i2cResetNeeded = true;
     
-    // Initialize SH2 units
-    for (unsigned unit = 0; unit < SH2_UNITS; unit++) {
-        memset(&sh2[unit], 0, sizeof(sh2[unit]));
+    // Initialize SH2 HAL data structure
+    memset(&sh2Hal, 0, sizeof(sh2Hal));
 
-        // Semaphore to block clients with block/unblock API
-        sh2[unit].blockSem = xSemaphoreCreateBinary();
-    }
-    sh2[0].rstn = rstn0;
-    sh2[0].bootn = bootn0;
+    // Semaphore to block clients with block/unblock API
+    sh2Hal.blockSem = xSemaphoreCreateBinary();
+    
+    sh2Hal.rstn = rstn0;
+    sh2Hal.bootn = bootn0;
 
-    // Put SH2 units in reset
-    for (unsigned unit = 0; unit < SH2_UNITS; unit++) {
-        sh2[unit].rstn(false);  // Hold in reset
-        sh2[unit].bootn(true);  // SH-2, not DFU
-    }
+    // Put SH2 device in reset
+    sh2Hal.rstn(false);  // Hold in reset
+    sh2Hal.bootn(true);  // SH-2, not DFU
 
     // init mutex for i2c bus
     i2cMutex = xSemaphoreCreateMutex();
@@ -149,41 +145,32 @@ void sh2_hal_init(I2C_HandleTypeDef* _hi2c)
 
 // Reset an SH-2 module (into DFU mode, if flag is true)
 // The onRx callback function is registered with the HAL at the same time.
-int sh2_hal_reset(unsigned unit,
-                  bool dfuMode,
+int sh2_hal_reset(bool dfuMode,
                   sh2_rxCallback_t *onRx,
                   void *cookie)
 {
-    // bail out if unit number is bad
-    if (unit >= SH2_UNITS) return SH2_ERR_BAD_PARAM;
-
     // Get exclusive access to i2c bus (blocking until we do.)
     xSemaphoreTake(i2cMutex, portMAX_DELAY);
 
     // Store params for later reference
-    sh2[unit].onRxCookie = cookie;
-    sh2[unit].onRx = onRx;
+    sh2Hal.onRxCookie = cookie;
+    sh2Hal.onRx = onRx;
 
-    // Set addr to use with this unit in this mode
-    if (unit == 1) {
-        sh2[unit].addr = dfuMode ? ADDR_DFU_1<<1 : ADDR_SH2_1<<1;
-    }
-    else {
-        sh2[unit].addr = dfuMode ? ADDR_DFU_0<<1 : ADDR_SH2_0<<1;
-    }
+    // Set addr to use in this mode
+    sh2Hal.addr = dfuMode ? ADDR_DFU_0<<1 : ADDR_SH2_0<<1;
     
     // Assert reset
-    sh2[unit].rstn(0);
+    sh2Hal.rstn(0);
     
     // Set BOOTN according to dfuMode
-    sh2[unit].bootn(dfuMode ? 0 : 1);
+    sh2Hal.bootn(dfuMode ? 0 : 1);
 
 
     // Wait for reset to take effect
     vTaskDelay(RESET_DELAY); 
        
     // Deassert reset
-    sh2[unit].rstn(1);
+    sh2Hal.rstn(1);
 
     // If reset into DFU mode, wait until bootloader should be ready
     if (dfuMode) {
@@ -200,65 +187,41 @@ int sh2_hal_reset(unsigned unit,
 }
 
 // Send data to SH-2
-int sh2_hal_tx(unsigned unit, uint8_t *pData, uint32_t len)
+int sh2_hal_tx(uint8_t *pData, uint32_t len)
 {
-    // Return error if unit param is bad
-    if (unit >= SH2_UNITS) {
-        return SH2_ERR_BAD_PARAM;
-    }
-
     // Do nothing if len is zero
     if (len == 0) {
         return SH2_OK;
     }
 
     // Do tx, and return when done
-    return i2cBlockingTx(sh2[unit].addr, pData, len);
+    return i2cBlockingTx(sh2Hal.addr, pData, len);
 }
 
 // Initiate a read of <len> bytes from SH-2
 // This is a blocking read, pData will contain read data on return
 // if return value was SH2_OK.
-int sh2_hal_rx(unsigned unit, uint8_t* pData, uint32_t len)
+int sh2_hal_rx(uint8_t* pData, uint32_t len)
 {
-    // Return error if unit param is bad
-    if (unit >= SH2_UNITS) {
-        return SH2_ERR_BAD_PARAM;
-    }
-
     // Do nothing if len is zero
     if (len == 0) {
         return SH2_OK;
     }
 
     // do rx and return when done
-    return i2cBlockingRx(sh2[unit].addr, pData, len);
+    return i2cBlockingRx(sh2Hal.addr, pData, len);
 }
 
-int sh2_hal_block(unsigned unit)
+int sh2_hal_block(void)
 {
-    // Return error if unit param is bad
-    if (unit >= SH2_UNITS) {
-        return SH2_ERR_BAD_PARAM;
-    }
-
-    Sh2_t* pSh2 = &sh2[unit];
-
-    xSemaphoreTake(pSh2->blockSem, portMAX_DELAY);
+    xSemaphoreTake(sh2Hal.blockSem, portMAX_DELAY);
 
     return SH2_OK;
 }
 
-int sh2_hal_unblock(unsigned unit)
+int sh2_hal_unblock(void)
 {
-    // Return error if unit param is bad
-    if (unit >= SH2_UNITS) {
-        return SH2_ERR_BAD_PARAM;
-    }
-
-    Sh2_t* pSh2 = &sh2[unit];
-
-    xSemaphoreGive(pSh2->blockSem);
+    xSemaphoreGive(sh2Hal.blockSem);
 
     return SH2_OK;
 }
@@ -274,7 +237,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t n)
         
     event.t_ms = xTaskGetTickCount();
     event.id = EVT_INTN;
-    event.unit = 0;
     
     xQueueSendFromISR(evtQueue, &event, &woken);
     portEND_SWITCHING_ISR(woken);
@@ -326,7 +288,6 @@ void HAL_I2C_ErrorCallback(I2C_HandleTypeDef * hi2c)
 static void halTask(const void *params)
 {
     Event_t event;
-    Sh2_t* pSh2 = 0;
     unsigned readLen = 0;
     unsigned cargoLen = 0;
 
@@ -334,21 +295,13 @@ static void halTask(const void *params)
         // Block until there is work to do
         xQueueReceive(evtQueue, &event, portMAX_DELAY);
 
-        // skip this event if unit number is bad
-        if (event.unit >= SH2_UNITS) continue;
-
-        // Look up HAL instance
-        pSh2 = &sh2[event.unit];
-                
         // Handle the event
         switch (event.id) {
             case EVT_INTN:
                 // If no RX callback registered, don't bother trying to read
-                if (pSh2->onRx != 0) {
-                    pSh2 = &sh2[event.unit];
-
+                if (sh2Hal.onRx != 0) {
                     // Compute read length
-                    readLen = pSh2->rxRemaining;
+                    readLen = sh2Hal.rxRemaining;
                     if (readLen < SHTP_HEADER_LEN) {
                         // always read at least the SHTP header
                         readLen = SHTP_HEADER_LEN;
@@ -359,23 +312,23 @@ static void halTask(const void *params)
                     }
 
                     // Read i2c
-                    i2cBlockingRx(pSh2->addr, pSh2->rxBuf, readLen);
+                    i2cBlockingRx(sh2Hal.addr, sh2Hal.rxBuf, readLen);
 
                     // Get total cargo length from SHTP header
-                    cargoLen = ((pSh2->rxBuf[1] << 8) + (pSh2->rxBuf[0])) & (~0x8000);
+                    cargoLen = ((sh2Hal.rxBuf[1] << 8) + (sh2Hal.rxBuf[0])) & (~0x8000);
                 
                     // Re-Evaluate rxRemaining
                     if (cargoLen > readLen) {
                         // More to read.
-                        pSh2->rxRemaining = (cargoLen - readLen) + SHTP_HEADER_LEN;
+                        sh2Hal.rxRemaining = (cargoLen - readLen) + SHTP_HEADER_LEN;
                     }
                     else {
                         // All done, next read should be header only.
-                        pSh2->rxRemaining = 0;
+                        sh2Hal.rxRemaining = 0;
                     }
 
                     // Deliver via onRx callback
-                    pSh2->onRx(pSh2->onRxCookie, pSh2->rxBuf, readLen, event.t_ms * 1000);
+                    sh2Hal.onRx(sh2Hal.onRxCookie, sh2Hal.rxBuf, readLen, event.t_ms * 1000);
                 }
 
                 break;

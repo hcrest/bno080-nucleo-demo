@@ -25,9 +25,6 @@
 #ifndef SH2_HAL_IMPL_H
 #define SH2_HAL_IMPL_H
 
-// This HAL only supports one instance of the BNO080.
-#define SH2_UNITS (1)
-
 #define SH2_HAL_MAX_TRANSFER (256)
 
 #endif  // end of include guard

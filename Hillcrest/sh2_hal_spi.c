@@ -120,8 +120,7 @@ typedef struct {
         DEV_NEW_INTN,
     } state;
 } Dev_t;
-Dev_t dev[SH2_UNITS];
-Dev_t *pActiveDev;
+Dev_t dev;
 
 typedef enum {
     EVT_INTN,
@@ -131,7 +130,6 @@ typedef enum {
 
 typedef struct {
     EventId_t id;
-    unsigned unit;
     uint32_t t_uS;
 } Event_t;
 
@@ -145,10 +143,9 @@ static void csn0(bool state);
 static void waken0(bool state);
 static void spiReset(bool dfuMode);
 
-static int tx_dfu(Dev_t* pDev, uint8_t* pData, uint32_t len);
-static int tx_shtp(Dev_t* pDev, uint8_t* pData, uint32_t len);
-static int rx_dfu(Dev_t* pDev, uint8_t* pData, uint32_t len);
-static int rx_shtp(Dev_t* pDev, uint8_t* pData, uint32_t len);
+static int tx_dfu(uint8_t* pData, uint32_t len);
+static int tx_shtp(uint8_t* pData, uint32_t len);
+static int rx_dfu(uint8_t* pData, uint32_t len);
 
 static void delayUs(uint32_t count);
 
@@ -164,29 +161,25 @@ void sh2_hal_init(SPI_HandleTypeDef* _hspi)
 
     spiReset(false);
 
-    // Initialize SH2 units
-    for (unsigned unit = 0; unit < SH2_UNITS; unit++) {
-        memset(&dev[unit], 0, sizeof(dev[unit]));
+    // Initialize SH2 device
+    memset(&dev, 0, sizeof(dev));
 
-        // Semaphore to protect transmit state
-        dev[unit].txMutex = xSemaphoreCreateBinary();
-        xSemaphoreGive(dev[unit].txMutex);
+    // Semaphore to protect transmit state
+    dev.txMutex = xSemaphoreCreateBinary();
+    xSemaphoreGive(dev.txMutex);
 
-        // Semaphore to block clients with block/unblock API
-        dev[unit].blockSem = xSemaphoreCreateBinary();
-    }
-    dev[0].rstn = rstn0;
-    dev[0].bootn = bootn0;
-    dev[0].csn = csn0;
-    dev[0].waken = waken0;
+    // Semaphore to block clients with block/unblock API
+    dev.blockSem = xSemaphoreCreateBinary();
 
-    // Put SH2 units in reset
-    for (unsigned unit = 0; unit < SH2_UNITS; unit++) {
-        dev[unit].rstn(false);  // Hold in reset
-        dev[unit].bootn(true);  // SH-2, not DFU
-        dev[unit].csn(true);    // deassert CSN
-        dev[unit].waken(true);  // deassert WAKEN.
-    }
+    dev.rstn = rstn0;
+    dev.bootn = bootn0;
+    dev.csn = csn0;
+    dev.waken = waken0;
+
+    dev.rstn(false);  // Hold in reset
+    dev.bootn(true);  // SH-2, not DFU
+    dev.csn(true);    // deassert CSN
+    dev.waken(true);  // deassert WAKEN.
 
     // init mutex for spi bus
     spiMutex = xSemaphoreCreateBinary();
@@ -208,22 +201,17 @@ void sh2_hal_init(SPI_HandleTypeDef* _hspi)
 
 // Reset an SH-2 module (into DFU mode, if flag is true)
 // The onRx callback function is registered with the HAL at the same time.
-int sh2_hal_reset(unsigned unit,
-                  bool dfuMode,
+int sh2_hal_reset(bool dfuMode,
                   sh2_rxCallback_t *onRx,
                   void *cookie)
 {
-    // bail out if unit number is bad
-    if (unit >= SH2_UNITS) return SH2_ERR_BAD_PARAM;
-
     // Get exclusive access to SPI bus (blocking until we do.)
     xSemaphoreTake(spiMutex, portMAX_DELAY);
-    pActiveDev = &dev[unit];
 
     // Store params for later reference
-    dev[unit].dfuMode = dfuMode;
-    dev[unit].onRxCookie = cookie;
-    dev[unit].onRx = onRx;
+    dev.dfuMode = dfuMode;
+    dev.onRxCookie = cookie;
+    dev.onRx = onRx;
 
     // Wait a bit before asserting reset.
     // (Because this may be a reset after a DFU and that process needs
@@ -232,16 +220,16 @@ int sh2_hal_reset(unsigned unit,
     vTaskDelay(RESET_DELAY); 
        
     // Assert reset
-    dev[unit].rstn(0);
+    dev.rstn(0);
 
     // Deassert CSN in case it was asserted
-    dev[unit].csn(1);
+    dev.csn(1);
     
     // Set BOOTN according to dfuMode
-    dev[unit].bootn(dfuMode ? 0 : 1);
+    dev.bootn(dfuMode ? 0 : 1);
 
     // set PS0 (WAKEN) to support booting into SPI mode.
-    dev[unit].waken(1);
+    dev.waken(1);
     
     // Reset SPI parameters
     spiReset(dfuMode);
@@ -250,7 +238,7 @@ int sh2_hal_reset(unsigned unit,
     vTaskDelay(RESET_DELAY); 
        
     // Deassert reset
-    dev[unit].rstn(1);
+    dev.rstn(1);
 
     // If reset into DFU mode, wait until bootloader should be ready
     if (dfuMode) {
@@ -258,54 +246,39 @@ int sh2_hal_reset(unsigned unit,
     }
 
     // Give up ownership of SPI bus.
-    pActiveDev = 0;
     xSemaphoreGive(spiMutex);
 
     return SH2_OK;
 }
 
 // Send data to SH-2
-int sh2_hal_tx(unsigned unit, uint8_t *pData, uint32_t len)
+int sh2_hal_tx(uint8_t *pData, uint32_t len)
 {
-    // Return error if unit param is bad
-    if (unit >= SH2_UNITS) {
-        return SH2_ERR_BAD_PARAM;
-    }
-
     // Do nothing if len is zero
     if (len == 0) {
         return SH2_OK;
     }
 
-    Dev_t* pDev = &dev[unit];
-
-    if (pDev->dfuMode) {
-        return tx_dfu(pDev, pData, len);
+    if (dev.dfuMode) {
+        return tx_dfu(pData, len);
     }
     else {
-        return tx_shtp(pDev, pData, len);
+        return tx_shtp(pData, len);
     }
 }
 
 // Initiate a read of <len> bytes from SH-2
 // This is a blocking read, pData will contain read data on return
 // if return value was SH2_OK.
-int sh2_hal_rx(unsigned unit, uint8_t* pData, uint32_t len)
+int sh2_hal_rx(uint8_t* pData, uint32_t len)
 {
-    // Return error if unit param is bad
-    if (unit >= SH2_UNITS) {
-        return SH2_ERR_BAD_PARAM;
-    }
-
     // Do nothing if len is zero
     if (len == 0) {
         return SH2_OK;
     }
 
-    Dev_t* pDev = &dev[unit];
-
-    if (pDev->dfuMode) {
-        return rx_dfu(pDev, pData, len);
+    if (dev.dfuMode) {
+        return rx_dfu(pData, len);
     }
     else {
         // sh2_hal_rx API isn't used in non-DFU mode.
@@ -313,30 +286,16 @@ int sh2_hal_rx(unsigned unit, uint8_t* pData, uint32_t len)
     }
 }
 
-int sh2_hal_block(unsigned unit)
+int sh2_hal_block(void)
 {
-    // Return error if unit param is bad
-    if (unit >= SH2_UNITS) {
-        return SH2_ERR_BAD_PARAM;
-    }
-
-    Dev_t* pDev = &dev[unit];
-
-    xSemaphoreTake(pDev->blockSem, portMAX_DELAY);
+    xSemaphoreTake(dev.blockSem, portMAX_DELAY);
 
     return SH2_OK;
 }
 
-int sh2_hal_unblock(unsigned unit)
+int sh2_hal_unblock(void)
 {
-    // Return error if unit param is bad
-    if (unit >= SH2_UNITS) {
-        return SH2_ERR_BAD_PARAM;
-    }
-
-    Dev_t* pDev = &dev[unit];
-
-    xSemaphoreGive(pDev->blockSem);
+    xSemaphoreGive(dev.blockSem);
 
     return SH2_OK;
 }
@@ -352,7 +311,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t n)
         
     event.t_uS = xTaskGetTickCount()*1000;
     event.id = EVT_INTN;
-    event.unit = 0;
     
     xQueueSendFromISR(evtQueue, &event, &woken);
     portEND_SWITCHING_ISR(woken);
@@ -410,7 +368,6 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef * hspi)
         
         event.id = EVT_OP_CPLT;
         event.t_uS = 99;    // not used
-        event.unit = 99;    // not used
 
         xQueueSendFromISR(evtQueue, &event, &woken);
     }
@@ -433,7 +390,6 @@ void HAL_SPI_ErrorCallback(SPI_HandleTypeDef * hspi)
 
     event.id = EVT_OP_ERR;
     event.t_uS = 99;    // not used
-    event.unit = 99;    // not used
     
     xQueueSendFromISR(evtQueue, &event, &woken);
     
@@ -444,67 +400,65 @@ void HAL_SPI_ErrorCallback(SPI_HandleTypeDef * hspi)
 // Private functions
 // ----------------------------------------------------------------------------------
 
-static void takeBus(Dev_t* pDev)
+static void takeBus(void)
 {
     // get bus mutex
     xSemaphoreTake(spiMutex, portMAX_DELAY);
-    pActiveDev = pDev;
 }
 
-static void relBus(Dev_t* pDev)
+static void relBus(void)
 {
     // Release bus
-    pActiveDev = 0;
     xSemaphoreGive(spiMutex);
 }
 
-static void deliverRx(Dev_t* pDev, uint32_t t_uS)
+static void deliverRx(uint32_t t_uS)
 {
     // Deliver results via onRx callback
-    if (pDev->onRx != 0) {
-        if (pDev->rxLen) {
-            pDev->onRx(pDev->onRxCookie, pDev->rxBuf, pDev->rxLen, t_uS);
+    if (dev.onRx != 0) {
+        if (dev.rxLen) {
+            dev.onRx(dev.onRxCookie, dev.rxBuf, dev.rxLen, t_uS);
         }
     }
 }
 
-static void endOpShtp(Dev_t* pDev)
+static void endOpShtp(void)
 {
     // record rx len
-    pDev->rxLen = spiTransferLen;
+    dev.rxLen = spiTransferLen;
     
     // Release transmit mutex if it's held.
-    if (pDev->txLen) {
-        pDev->txLen = 0;
+    if (dev.txLen) {
+        dev.txLen = 0;
         dbgClr();
-        xSemaphoreGive(pDev->txMutex);
+        xSemaphoreGive(dev.txMutex);
     }
 
     // deassert CSN
-    pDev->csn(true);
+    dev.csn(true);
 
     // Release the bus
-    relBus(pDev);
+    relBus();
 }
 
-static int startOpShtp(Dev_t* pDev)
+static int startOpShtp(void)
 {
     int retval = 0;
     
     // Set up operation on bus
-    takeBus(pDev);
+    takeBus();
                     
     // assert CSN
-    pDev->csn(false);
+    dev.csn(false);
     
     // Read into device's rxBuf
-    spiRxData = pDev->rxBuf;
+    spiRxData = dev.rxBuf;
                     
     // If there is stuff to transmit, deassert WAKE and do it now.
     spiTxData = txZeros;
-    if (pDev->txLen) {
-        pDev->waken(true);
-        spiTxData = pDev->txBuf;
+    if (dev.txLen) {
+        dev.waken(true);
+        spiTxData = dev.txBuf;
     }
 
     // initiate (Header phase of) transfer
@@ -514,7 +468,7 @@ static int startOpShtp(Dev_t* pDev)
     int rc = HAL_SPI_TransmitReceive_IT(hspi, (uint8_t*)spiTxData, spiRxData, 2);
     if (rc != 0) {
         // Failed to start!  Abort!
-        endOpShtp(pDev);
+        endOpShtp();
         retval = -1;
     }
 
@@ -524,9 +478,7 @@ static int startOpShtp(Dev_t* pDev)
 static void halTask(const void *params)
 {
     Event_t event;
-    Dev_t* pDev = 0;
     static volatile uint32_t trap = 0;
-    int status;
     static volatile uint32_t oops = 0;
     int rc;
 
@@ -537,90 +489,80 @@ static void halTask(const void *params)
         // Handle the event
         switch (event.id) {
             case EVT_INTN:
-                // skip this event if unit number is bad
-                if (event.unit >= SH2_UNITS) continue;
-
-                // Look up HAL instance
-                pDev = &dev[event.unit];
-                
-                if (pDev->dfuMode) {
+                if (dev.dfuMode) {
                     // Ignore INTN in DFU mode
                 }
                 else {
-                    if (pDev->state == DEV_IDLE) {
+                    if (dev.state == DEV_IDLE) {
                         // Start a new operation and go to IN-PROGRESS state
-                        pDev->state = DEV_IN_PROG;
-                        pDev->t_uS = event.t_uS;
-                        rc = startOpShtp(pDev);
+                        dev.state = DEV_IN_PROG;
+                        dev.t_uS = event.t_uS;
+                        rc = startOpShtp();
                         if (rc) {
                             // failure to start
-                            pDev->state = DEV_IDLE;
+                            dev.state = DEV_IDLE;
                         }
                     }
                     else {
                         // An operation is still in progress, go to NEW-INTN state
-                        pDev->pending_t_uS = event.t_uS;
-                        pDev->state = DEV_NEW_INTN;
+                        dev.pending_t_uS = event.t_uS;
+                        dev.state = DEV_NEW_INTN;
                     }
                 }
                 break;
             case EVT_OP_CPLT:
-                pDev = pActiveDev;
-                
-                if (pDev->dfuMode) {
+                if (dev.dfuMode) {
                     // Ignore this event.
                     // By design, this shouldn't happen.  DFU mode doesn't use interrupt
                     // mode SPI API.
                 }
                 else {
                     // Post-op for operation that just completed
-                    endOpShtp(pDev);
+                    endOpShtp();
 
                     // Deliver received content
-                    deliverRx(pDev, pDev->t_uS);
+                    deliverRx(dev.t_uS);
 
                     // If a new INTN was signalled, start the next op
-                    if (pDev->state == DEV_NEW_INTN) {
+                    if (dev.state == DEV_NEW_INTN) {
                         // start next op
-                        pDev->t_uS = pDev->pending_t_uS;
-                        pDev->state = DEV_IN_PROG;
-                        rc = startOpShtp(pDev);
+                        dev.t_uS = dev.pending_t_uS;
+                        dev.state = DEV_IN_PROG;
+                        rc = startOpShtp();
                         if (rc) {
                             // failure to start
-                            pDev->state = DEV_IDLE;
+                            dev.state = DEV_IDLE;
                         }
                     }
                     else {
                         // no operation in progress now.
-                        pDev->state = DEV_IDLE;
+                        dev.state = DEV_IDLE;
                     }
                 }
                 break;
             case EVT_OP_ERR:
-                if (pDev->dfuMode) {
+                if (dev.dfuMode) {
                     // Ignore this event.
                     // By design, this shouldn't happen.  DFU mode doesn't use interrupt
                     // mode SPI API.
                 }
                 else {
-                    pDev = pActiveDev;
-                
-                    endOpShtp(pDev);
+                    endOpShtp();
 
                     // If a new INTN was signalled, start the next op
-                    if (pDev->state == DEV_NEW_INTN) {
+                    if (dev.state == DEV_NEW_INTN) {
                         // start next op
-                        pDev->t_uS = pDev->pending_t_uS;
-                        pDev->state = DEV_IN_PROG;
-                        rc = startOpShtp(pDev);
+                        dev.t_uS = dev.pending_t_uS;
+                        dev.state = DEV_IN_PROG;
+                        rc = startOpShtp();
                         if (rc) {
                             // failure to start
-                            pDev->state = DEV_IDLE;
+                            dev.state = DEV_IDLE;
                         }
                     }
                     else {
                         // no operation in progress now.
-                        pDev->state = DEV_IDLE;
+                        dev.state = DEV_IDLE;
                     }
                 }
                 break;
@@ -670,7 +612,6 @@ static void spiReset(bool dfuMode)
         // For some reason, SCLK is still in high state even after being
         // configured to be low.  Doing one SPI operation with no CS
         // asserted gets it in proper initial state.
-        /// dev[unit].csn(0);
         uint8_t dummyTx[1];
         uint8_t dummyRx[1];
 
@@ -681,20 +622,20 @@ static void spiReset(bool dfuMode)
     }
 }           
 
-static int tx_dfu(Dev_t* pDev, uint8_t* pData, uint32_t len)
+static int tx_dfu(uint8_t* pData, uint32_t len)
 {
     int status = SH2_OK;
 
-    takeBus(pDev);
+    takeBus();
 
     // assert CSN
-    pDev->csn(false);
+    dev.csn(false);
 
     delayUs(DFU_CS_TIMING_US);
     
     // Set up Tx, Rx bufs
     spiTxData = pData;
-    spiRxData = pDev->rxBuf;
+    spiRxData = dev.rxBuf;
 
     // We will just use a simple one-phase transfer for DFU
     transferPhase = TRANSFER_DATA;
@@ -714,62 +655,62 @@ static int tx_dfu(Dev_t* pDev, uint8_t* pData, uint32_t len)
 
     if (rc == 0) {
         // Set return status
-        pDev->rxLen = spiTransferLen;
+        dev.rxLen = spiTransferLen;
         status = spiOpStatus;
     }
     else {
         // SPI operation failed
-        pDev->rxLen = 0;
+        dev.rxLen = 0;
         status = SH2_ERR_IO;
     }
 
     // deassert CSN
-    pDev->csn(true);
+    dev.csn(true);
 
     // Wait on each CSN assertion.  DFU Requires at least 5ms of deasserted time!
     vTaskDelay(DFU_CS_DEASSERT_DELAY_TX);
 
-    relBus(pDev);
+    relBus();
     
     return status;
 }
 
-static int tx_shtp(Dev_t* pDev, uint8_t* pData, uint32_t len)
+static int tx_shtp(uint8_t* pData, uint32_t len)
 {
     int status = SH2_OK;
     static volatile uint32_t wtf = 0;
 
     // Get semaphore on device
     wtf++;
-    xSemaphoreTake(pDev->txMutex, portMAX_DELAY);
+    xSemaphoreTake(dev.txMutex, portMAX_DELAY);
 
     // Set up txLen and txBuf
-    memset(pDev->txBuf, 0, sizeof(pDev->txBuf));
-    memcpy(pDev->txBuf, pData, len);
+    memset(dev.txBuf, 0, sizeof(dev.txBuf));
+    memcpy(dev.txBuf, pData, len);
     
     // Assert WAKE
     dbgSet();
-    pDev->waken(false);
+    dev.waken(false);
 
     // Finally, set len, which triggers tx processing in HAL task
-    pDev->txLen = len;
+    dev.txLen = len;
     
     // Transmission will take place after INTN is processed.
     
     return status;
 }
 
-static int rx_dfu(Dev_t* pDev, uint8_t* pData, uint32_t len)
+static int rx_dfu(uint8_t* pData, uint32_t len)
 {
     int status = SH2_OK;
 
-    takeBus(pDev);
+    takeBus();
 
     // Wait on each CSN assertion.  DFU Requires at least 5ms of deasserted time!
     vTaskDelay(DFU_CS_DEASSERT_DELAY_RX);
 
     // assert CSN
-    pDev->csn(false);
+    dev.csn(false);
     delayUs(DFU_CS_TIMING_US);
                     
     // Set up Tx, Rx bufs
@@ -793,22 +734,22 @@ static int rx_dfu(Dev_t* pDev, uint8_t* pData, uint32_t len)
 
     if (rc == 0) {
         // Set return status
-        pDev->rxLen = spiTransferLen;
+        dev.rxLen = spiTransferLen;
         status = spiOpStatus;
     }
     else {
         // SPI operation failed
-        pDev->rxLen = 0;
+        dev.rxLen = 0;
         status = SH2_ERR_IO;
     }
 
     // deassert CSN
-    pDev->csn(true);
+    dev.csn(true);
 
     // Wait after each CSN deassertion in DFU mode to ensure proper timing.
     vTaskDelay(DFU_CS_DEASSERT_DELAY_RX);
 
-    relBus(pDev);
+    relBus();
     
     return status;
 }

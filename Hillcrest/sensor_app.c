@@ -44,13 +44,11 @@
 
 // --- Forward declarations -------------------------------------------
 
-static void reportProdIds(unsigned unit);
-static void testDcdAutoSave(unsigned unit);
-static void startReports(unsigned unit);
+static void reportProdIds(void);
+static void startReports(void);
 static void eventHandler(void * cookie, sh2_AsyncEvent_t *pEvent);
 static void printEvent(const sh2_SensorEvent_t *pEvent);
 static void sensorHandler(void * cookie, sh2_SensorEvent_t *pEvent);
-static void testFrs(unsigned unit);
 
 // --- Private data ---------------------------------------------------
 
@@ -69,7 +67,6 @@ sh2_SensorEvent_t sensorEvent;
 
 void demoTaskStart(const void * params)
 {
-    unsigned unit = 0;
     static uint32_t sensors = 0;
 
     printf("\n\nHillcrest SH-2 Demo.\n");
@@ -79,7 +76,7 @@ void demoTaskStart(const void * params)
 #ifdef PERFORM_DFU
     // Perform DFU
     printf("Starting DFU process\n");
-    int status = dfu(unit, &firmware);
+    int status = dfu(&firmware);
     
     printf("DFU completed with status: %d\n", status);
 
@@ -90,23 +87,23 @@ void demoTaskStart(const void * params)
 #endif
 
     // init SHTP layer
-    shtp_init(unit);
+    shtp_init();
 
     resetPerformed = false;
     startedReports = false;
 
     // init SH2 layer
-    sh2_initialize(unit, eventHandler, (void *)unit);
+    sh2_initialize(eventHandler, NULL);
     
     // Register event listener
-    sh2_setSensorCallback(unit, sensorHandler, (void *)unit);
+    sh2_setSensorCallback(sensorHandler, NULL);
 
     while (!resetPerformed) {
         vTaskDelay(1);
     }
 
     // Read out product id
-    reportProdIds(unit);
+    reportProdIds();
 
     // Process sensors forever
     while (1) {
@@ -123,27 +120,12 @@ void demoTaskStart(const void * params)
           printf("Starting Sensor Reports.\n");
 
           // Enable reports from Rotation Vector.
-          startReports(unit);
+          startReports();
         }
-#if 0
-        if (execResetPerformed) {
-          execResetPerformed = false;
-          printf("Exec Reset Event, Starting reports.\n");  
-        }
-#endif
     }
 }
 
 // --- Private methods ----------------------------------------------
-
-#if 0
-static void execResetHandler(void * cookie)
-{
-    execResetPerformed = true;
-
-    xSemaphoreGive(wakeSensorTask);
-}
-#endif
 
 static void eventHandler(void * cookie, sh2_AsyncEvent_t *pEvent)
 {
@@ -164,12 +146,12 @@ static void sensorHandler(void * cookie, sh2_SensorEvent_t *pEvent)
     xSemaphoreGive(wakeSensorTask);
 }
 
-static void reportProdIds(unsigned unit)
+static void reportProdIds(void)
 {
     int status;
     
     memset(&prodIds, 0, sizeof(prodIds));
-    status = sh2_getProdIds(unit, &prodIds);
+    status = sh2_getProdIds(&prodIds);
     
     if (status < 0) {
         printf("Error from sh2_getProdIds.\n");
@@ -186,33 +168,7 @@ static void reportProdIds(unsigned unit)
 
 }
 
-static void testDcdAutoSave(unsigned unit)
-{
-    sh2_setDcdAutoSave(unit, false);
-
-    sh2_setDcdAutoSave(unit, true);
-}
-
-static void testFrs(unsigned unit)
-{
-    static uint32_t myfrs[256];
-    static uint16_t len = 256;
-
-    printf("Testing FRS read/write.\n");
-    
-    len = 256;
-    sh2_getFrs(unit, NOMINAL_CALIBRATION, myfrs, &len);
-    printf("Read Nominal cal: %d FRS words.\n", len);
-
-    sh2_setFrs(unit, USER_RECORD, myfrs, len);
-    printf("Wrote User record: %d FRS words.\n", len);
-
-    len = 256;
-    sh2_getFrs(unit, USER_RECORD, myfrs, &len);
-    printf("Read User record: %d FRS words.\n", len);
-}
-
-void startReports(unsigned unit)
+void startReports(void)
 {
     static sh2_SensorConfig_t config;
     int status;
@@ -225,14 +181,12 @@ void startReports(unsigned unit)
     config.reportInterval_us = 10000;  // microseconds (100Hz)
     config.batchInterval_us = 0;
 
-    status = sh2_setSensorConfig(unit,
-                                 SH2_ROTATION_VECTOR, &config);
+    status = sh2_setSensorConfig(SH2_ROTATION_VECTOR, &config);
     if (status != 0) {
         printf("Error while enabling RotationVector sensor: %d\n", status);
     }
     
-    status = sh2_getSensorConfig(unit,
-                                 SH2_ROTATION_VECTOR, &config);
+    status = sh2_getSensorConfig(SH2_ROTATION_VECTOR, &config);
     if (status != 0) {
         printf("Error while getting RotationVector config: %d\n", status);
     }
