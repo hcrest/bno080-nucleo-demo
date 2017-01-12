@@ -5,7 +5,7 @@ BNO080 development kit.
 
 The code runs on an ST Nucleo evaluation board combined with the BNO
 shield board by Hillcrest.  This shield incorporates the BNO080
-SensorHub, enabling SH-2 SensorHub functionality for the demo system.
+sensor hub, enabling SH-2 functionality for the demo system.
 
 ## Requirements
 
@@ -16,10 +16,10 @@ SensorHub, enabling SH-2 SensorHub functionality for the demo system.
 ## Setup
 
 Clone this repository using the --recursive flag with git:
-  * git clone --recursive http://github.hcrest.com/hillcrest/sh2-example-nucleo
+  * git clone --recursive https://github.com/hcrest/bno080-nucleo-demo.git
 
 ## Building the Code
-* Use IAR EWARM to open the workspace, sh2-example-nucleo/EWARM/Project.eww
+* Use IAR EWARM to open the workspace, bno080-nucleo-demo/EWARM/Project.eww
 * Select the sh2-demo-i2c or sh2-demo-spi project configuration.
 * Run Project -> Rebuild All to compile the project.
 
@@ -33,15 +33,15 @@ Clone this repository using the --recursive flag with git:
 * Once the debugger is ready, click the Go button.
 
 The application should print the SH-2 version numbers, then start
-reading and printing Rotation Vectors from the SensorHub:
+reading and printing Rotation Vectors from the sensor hub:
 
 ```
 
 Hillcrest SH-2 Demo.
+SH2 Reset.
 Part 10003608 : Version 3.2.4 Build 283
 Part 10003606 : Version 1.2.3 Build 206
-Reset Event.
-Exec Reset Event, Starting reports.
+Starting Sensor Reports.
   0.3756 Rotation Vector: r:0.931 i:-0.013 j:0.014 k:-0.364 (acc: 180.001 deg)
   0.3858 Rotation Vector: r:0.931 i:-0.013 j:0.014 k:-0.364 (acc: 180.001 deg)
   0.3958 Rotation Vector: r:0.931 i:-0.013 j:0.014 k:-0.364 (acc: 180.001 deg)
