@@ -185,11 +185,6 @@ void startReports(void)
     if (status != 0) {
         printf("Error while enabling RotationVector sensor: %d\n", status);
     }
-    
-    status = sh2_getSensorConfig(SH2_ROTATION_VECTOR, &config);
-    if (status != 0) {
-        printf("Error while getting RotationVector config: %d\n", status);
-    }
 }
 
 void printEvent(const sh2_SensorEvent_t * event)
@@ -239,8 +234,8 @@ void printEvent(const sh2_SensorEvent_t * event)
             j = value.un.gyroIntegratedRV.j;
             k = value.un.gyroIntegratedRV.k;
             x = value.un.gyroIntegratedRV.angVelX;
-            y = value.un.gyroIntegratedRV.angVelX;
-            z = value.un.gyroIntegratedRV.angVelX;
+            y = value.un.gyroIntegratedRV.angVelY;
+            z = value.un.gyroIntegratedRV.angVelZ;
             printf("%8.4f Gyro Integrated RV: "
                    "r:%5.3f i:%5.3f j:%5.3f k:%5.3f x:%5.3f y:%5.3f z:%5.3f\n",
                    t,
