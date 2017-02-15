@@ -34,7 +34,12 @@
 #include "sh2_err.h"
 #include "sh2_SensorValue.h"
 
+// Define this to produce DSF data for logging
+// #define DSF_OUTPUT
+
+// Define this to perform fimware update at startup.
 // #define PERFORM_DFU
+
 #ifdef PERFORM_DFU
 #include "dfu.h"
 #include "firmware.h"
@@ -68,6 +73,8 @@ static void configureForHmd(void);
 static void configureForDefault(void);
 static void startReports(void);
 static void eventHandler(void * cookie, sh2_AsyncEvent_t *pEvent);
+static void printDsfHeaders(void);
+static void printDsf(const sh2_SensorEvent_t * event);
 static void printEvent(const sh2_SensorEvent_t *pEvent);
 static void sensorHandler(void * cookie, sh2_SensorEvent_t *pEvent);
 
@@ -124,8 +131,13 @@ void demoTaskStart(const void * params)
         vTaskDelay(1);
     }
 
-    // Read out product id
+#ifdef DSF_OUTPUT
+    // Print DSF file headers
+    printDsfHeaders();
+#else
+    // Read and display BNO080 product ids
     reportProdIds();
+#endif
 
     // Process sensors forever
     while (1) {
@@ -135,24 +147,28 @@ void demoTaskStart(const void * params)
         if (sensorReceived) {
             sensorReceived = false;
             sensors++;
+#ifdef DSF_OUTPUT
+            printDsf(&sensorEvent);
+#else
             printEvent(&sensorEvent);
+#endif
         }
         if (resetPerformed) {
-          resetPerformed = false;
+            resetPerformed = false;
           
 #ifdef CONFIGURE_HMD
-          // Configure BNO080 for optimal HMD operation
-          // (Enable prediction for Gyro Integrated Rotation Vector)
-          configureForHmd();
+            // Configure BNO080 for optimal HMD operation
+            // (Enable prediction for Gyro Integrated Rotation Vector)
+            configureForHmd();
 #else
-          // Configure BNO080 for default operation
-          // (Disable prediction for Gyro Integrated Rotation Vector)
-          configureForDefault();
+            // Configure BNO080 for default operation
+            // (Disable prediction for Gyro Integrated Rotation Vector)
+            configureForDefault();
 #endif
           
 
-          // Enable reports from Rotation Vector.
-          startReports();
+            // Enable reports from Rotation Vector.
+            startReports();
         }
     }
 }
@@ -274,6 +290,7 @@ static void startReports(void)
 {
     static sh2_SensorConfig_t config;
     int status;
+    int sensorId;
         
     printf("Starting Sensor Reports.\n");
 
@@ -283,11 +300,136 @@ static void startReports(void)
     config.alwaysOnEnabled = false;
     config.changeSensitivity = 0;
     config.reportInterval_us = 10000;  // microseconds (100Hz)
+    // config.reportInterval_us = 1000;   // microseconds (1000Hz)
     config.batchInterval_us = 0;
 
-    status = sh2_setSensorConfig(SH2_GYRO_INTEGRATED_RV, &config);
+    sensorId = SH2_ROTATION_VECTOR;
+    // sensorId = SH2_GYRO_INTEGRATED_RV;
+    status = sh2_setSensorConfig(sensorId, &config);
     if (status != 0) {
-        printf("Error while enabling RotationVector sensor: %d\n", status);
+        printf("Error while enabling sensor %d\n", sensorId);
+    }
+}
+
+static void printDsfHeaders(void)
+{
+    printf("+%d TIME[x]{s}, SAMPLE_ID[x]{samples}, ANG_POS_GLOBAL[rijk]{quaternion}, ANG_POS_ACCURACY[x]{rad}\n",
+           SH2_ROTATION_VECTOR);
+    printf("+%d TIME[x]{s}, SAMPLE_ID[x]{samples}, RAW_ACCELEROMETER[xyz]{adc units}\n",
+           SH2_RAW_ACCELEROMETER);
+    printf("+%d TIME[x]{s}, SAMPLE_ID[x]{samples}, RAW_MAGNETOMETER[xyz]{adc units}\n",
+           SH2_RAW_MAGNETOMETER);
+    printf("+%d TIME[x]{s}, SAMPLE_ID[x]{samples}, RAW_GYROSCOPE[xyz]{adc units}\n",
+           SH2_RAW_GYROSCOPE);
+    printf("+%d TIME[x]{s}, SAMPLE_ID[x]{samples}, ACCELEROMETER[xyz]{m/s^2}\n",
+           SH2_ACCELEROMETER);
+    printf("+%d TIME[x]{s}, SAMPLE_ID[x]{samples}, MAG_FIELD[xyz]{uTesla}, STATUS[x]{enum}\n",
+           SH2_MAGNETIC_FIELD_CALIBRATED);
+    printf("+%d TIME[x]{s}, ANG_VEL_GYRO_RV[xyz]{rad/s}, ANG_POS_GYRO_RV[wxyz]{quaternion}\n",
+           SH2_GYRO_INTEGRATED_RV);
+}
+
+static void printDsf(const sh2_SensorEvent_t * event)
+{
+    float t, r, i, j, k, acc_rad;
+    float angVelX, angVelY, angVelZ;
+    static uint32_t lastSequence[SH2_MAX_SENSOR_ID+1];  // last sequence number for each sensor
+    sh2_SensorValue_t value;
+
+    // Convert event to value
+    sh2_decodeSensorEvent(&value, event);
+    
+    // Compute new sample_id
+    uint8_t deltaSeq = value.sequence - (lastSequence[value.sensorId] & 0xFF);
+    lastSequence[value.sensorId] += deltaSeq;
+
+    // Get time as float
+    t = value.timestamp / 1000000.0;
+    
+    switch (value.sensorId) {
+        case SH2_RAW_ACCELEROMETER:
+            printf(".%d %0.6f, %d, %d, %d, %d\n",
+                   SH2_RAW_ACCELEROMETER,
+                   t,
+                   lastSequence[value.sensorId],
+                   value.un.rawAccelerometer.x,
+                   value.un.rawAccelerometer.y,
+                   value.un.rawAccelerometer.z);
+            break;
+        
+        case SH2_RAW_MAGNETOMETER:
+            printf(".%d %0.6f, %d, %d, %d, %d\n",
+                   SH2_RAW_MAGNETOMETER,
+                   t,
+                   lastSequence[value.sensorId],
+                   value.un.rawMagnetometer.x,
+                   value.un.rawMagnetometer.y,
+                   value.un.rawMagnetometer.z);
+            break;
+        
+        case SH2_RAW_GYROSCOPE:
+            printf(".%d %0.6f, %d, %d, %d, %d\n",
+                   SH2_RAW_GYROSCOPE,
+                   t,
+                   lastSequence[value.sensorId],
+                   value.un.rawGyroscope.x,
+                   value.un.rawGyroscope.y,
+                   value.un.rawGyroscope.z);
+            break;
+
+        case SH2_MAGNETIC_FIELD_CALIBRATED:
+            printf(".%d %0.6f, %d, %0.3f, %0.3f, %0.3f, %u\n",
+                   SH2_MAGNETIC_FIELD_CALIBRATED,
+                   t,
+                   lastSequence[value.sensorId],
+                   value.un.magneticField.x,
+                   value.un.magneticField.y,
+                   value.un.magneticField.z,
+                   value.status & 0x3
+                );
+            break;
+        
+        case SH2_ACCELEROMETER:
+            printf(".%d %0.6f, %d, %0.3f, %0.3f, %0.3f\n",
+                   SH2_ACCELEROMETER,
+                   t,
+                   lastSequence[value.sensorId],
+                   value.un.accelerometer.x,
+                   value.un.accelerometer.y,
+                   value.un.accelerometer.z);
+            break;
+        
+        case SH2_ROTATION_VECTOR:
+            r = value.un.rotationVector.real;
+            i = value.un.rotationVector.i;
+            j = value.un.rotationVector.j;
+            k = value.un.rotationVector.k;
+            acc_rad = value.un.rotationVector.accuracy;
+            printf(".%d %0.6f, %d, %0.3f, %0.3f, %0.3f, %0.3f, %0.3f\n",
+                   SH2_ROTATION_VECTOR,
+                   t,
+                   lastSequence[value.sensorId],
+                   r, i, j, k,
+                   acc_rad);
+            break;
+        
+        case SH2_GYRO_INTEGRATED_RV:
+            angVelX = value.un.gyroIntegratedRV.angVelX;
+            angVelY = value.un.gyroIntegratedRV.angVelY;
+            angVelZ = value.un.gyroIntegratedRV.angVelZ;
+            r = value.un.gyroIntegratedRV.real;
+            i = value.un.gyroIntegratedRV.i;
+            j = value.un.gyroIntegratedRV.j;
+            k = value.un.gyroIntegratedRV.k;
+            printf(".%d %0.6f, %0.6f, %0.6f, %0.6f, %0.6f, %0.6f, %0.6f, %0.6f\n",
+                   SH2_GYRO_INTEGRATED_RV,
+                   t,
+                   angVelX, angVelY, angVelZ,
+                   r, i, j, k);
+            break;
+        default:
+            printf("Unknown sensor: %d\n", value.sensorId);
+            break;
     }
 }
 
