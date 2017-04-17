@@ -1,7 +1,7 @@
 /**
   ******************************************************************************
-  * File Name          : freertos.c
-  * Description        : Code for freertos applications
+  * File Name          : main.h
+  * Description        : This file contains the common defines of the application
   ******************************************************************************
   *
   * Copyright (c) 2017 STMicroelectronics International N.V. 
@@ -40,31 +40,39 @@
   *
   ******************************************************************************
   */
+/* Define to prevent recursive inclusion -------------------------------------*/
+#ifndef __MAIN_H
+#define __MAIN_H
+  /* Includes ------------------------------------------------------------------*/
 
-/* Includes ------------------------------------------------------------------*/
-#include "FreeRTOS.h"
-#include "task.h"
-
-/* USER CODE BEGIN Includes */     
+/* USER CODE BEGIN Includes */
 
 /* USER CODE END Includes */
 
-/* Variables -----------------------------------------------------------------*/
+/* Private define ------------------------------------------------------------*/
 
-/* USER CODE BEGIN Variables */
+#define SH_WAKEN_Pin GPIO_PIN_10
+#define SH_WAKEN_GPIO_Port GPIOB
+#define SH_INTN_Pin GPIO_PIN_10
+#define SH_INTN_GPIO_Port GPIOA
+#define SH_RSTN_Pin GPIO_PIN_4
+#define SH_RSTN_GPIO_Port GPIOB
+#define SH_BOOTN_Pin GPIO_PIN_5
+#define SH_BOOTN_GPIO_Port GPIOB
+#define SH_CSN_Pin GPIO_PIN_6
+#define SH_CSN_GPIO_Port GPIOB
 
-/* USER CODE END Variables */
+/* USER CODE BEGIN Private defines */
 
-/* Function prototypes -------------------------------------------------------*/
+/* USER CODE END Private defines */
 
-/* USER CODE BEGIN FunctionPrototypes */
+/**
+  * @}
+  */ 
 
-/* USER CODE END FunctionPrototypes */
+/**
+  * @}
+*/ 
 
-/* Hook prototypes */
-
-/* USER CODE BEGIN Application */
-     
-/* USER CODE END Application */
-
+#endif /* __MAIN_H */
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
