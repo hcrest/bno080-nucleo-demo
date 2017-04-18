@@ -52,7 +52,7 @@ struct HcbinMetadata {
 };
 static const struct HcbinMetadata hcbinMetadata[] = {
     {"FW-Format", "BNO_V1"},
-    {"SW-Part-Number", "1000-3608"},
+    {"SW-Part-Number", "1000-xxxx"},
     {"SW-Version", "1.0.0"},
     {"SW-Build", "0"},
     {"Build-Timestamp", "2016-11-14T19:09:51.671350"},

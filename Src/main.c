@@ -234,6 +234,7 @@ void SystemClock_Config(void)
   HAL_NVIC_SetPriority(SysTick_IRQn, 15, 0);
 }
 
+#if defined(SH2_HAL_I2C)
 /* I2C1 init function */
 static void MX_I2C1_Init(void)
 {
@@ -253,7 +254,9 @@ static void MX_I2C1_Init(void)
   }
 
 }
+#endif
 
+#if defined(SH2_HAL_SPI)
 /* SPI1 init function */
 static void MX_SPI1_Init(void)
 {
@@ -276,6 +279,7 @@ static void MX_SPI1_Init(void)
   }
 
 }
+#endif
 
 /* USART2 init function */
 static void MX_USART2_UART_Init(void)

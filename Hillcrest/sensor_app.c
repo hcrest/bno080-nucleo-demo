@@ -38,7 +38,10 @@
 // #define DSF_OUTPUT
 
 // Define this to perform fimware update at startup.
-// #define PERFORM_DFU
+#define PERFORM_DFU
+
+// Define this to use HMD-appropriate configuration.
+// #define CONFIGURE_HMD
 
 #ifdef PERFORM_DFU
 #include "dfu.h"
@@ -48,35 +51,24 @@
 #define FIX_Q(n, x) ((int32_t)(x * (float)(1 << n)))
 const float scaleDegToRad = 3.14159265358 / 180.0;
 
-// Uncomment this line to set up BNO080 for HMD use.
-// #define CONFIGURE_HMD
-#define GIRV_REF_6AG  (0x0207)  // 6 axis Game Rotation Vector 
-#define GIRV_REF_9AGM (0x0204)  // 9 axis Absolute Rotation Vector
-#define HMD_SYNC_INTERVAL (10000)                     // sync interval: 10000 uS (100Hz)
-#define HMD_MAX_ERR FIX_Q(29, (30.0 * scaleDegToRad)) // max error: 30 degrees
-#define HMD_PRED_AMT FIX_Q(10, 0.028)                 // prediction amt: 28ms
-#define HMD_ALPHA FIX_Q(20, 0.303072543909142)        // pred param alpha
-#define HMD_BETA  FIX_Q(20, 0.113295896384921)        // pred param beta
-#define HMD_GAMMA FIX_Q(20, 0.002776219713054)        // pred param gamma
-
-#define DFLT_SYNC_INTERVAL (10000)                     // sync interval: 10000 uS (100Hz)
-#define DFLT_MAX_ERR FIX_Q(29, (30.0 * scaleDegToRad)) // max error: 30 degrees
-#define DFLT_PRED_AMT FIX_Q(10, 0.0)                   // prediction amt: 0ms = prediction disabled
-#define DFLT_ALPHA FIX_Q(20, 0.303072543909142)        // pred param alpha (factory default)
-#define DFLT_BETA  FIX_Q(20, 0.113295896384921)        // pred param beta (factory default)
-#define DFLT_GAMMA FIX_Q(20, 0.002776219713054)        // pred param gamma (factory default)
-
 // --- Forward declarations -------------------------------------------
 
-static void reportProdIds(void);
-static void configureForHmd(void);
-static void configureForDefault(void);
 static void startReports(void);
 static void eventHandler(void * cookie, sh2_AsyncEvent_t *pEvent);
-static void printDsfHeaders(void);
-static void printDsf(const sh2_SensorEvent_t * event);
-static void printEvent(const sh2_SensorEvent_t *pEvent);
 static void sensorHandler(void * cookie, sh2_SensorEvent_t *pEvent);
+static void configure(void);
+
+#ifdef DSF_OUTPUT
+    static void printDsfHeaders(void);
+    static void printDsf(const sh2_SensorEvent_t * event);
+#endif
+
+#ifndef DSF_OUTPUT
+    static void reportProdIds(void);
+    static void printEvent(const sh2_SensorEvent_t *pEvent);
+#endif
+
+
 
 // --- Private data ---------------------------------------------------
 
@@ -155,18 +147,12 @@ void demoTaskStart(const void * params)
         }
         if (resetPerformed) {
             resetPerformed = false;
-          
-#ifdef CONFIGURE_HMD
-            // Configure BNO080 for optimal HMD operation
-            // (Enable prediction for Gyro Integrated Rotation Vector)
-            configureForHmd();
-#else
-            // Configure BNO080 for default operation
-            // (Disable prediction for Gyro Integrated Rotation Vector)
-            configureForDefault();
-#endif
-          
 
+            // Configure some parameters of the BNO080:
+            // Gyro Integrated Rotation Vector prediction and dynamic
+            // calibration settings.
+            configure();
+            
             // Enable reports from Rotation Vector.
             startReports();
         }
@@ -194,95 +180,56 @@ static void sensorHandler(void * cookie, sh2_SensorEvent_t *pEvent)
     xSemaphoreGive(wakeSensorTask);
 }
 
-static void reportProdIds(void)
-{
-    int status;
-    
-    memset(&prodIds, 0, sizeof(prodIds));
-    status = sh2_getProdIds(&prodIds);
-    
-    if (status < 0) {
-        printf("Error from sh2_getProdIds.\n");
-        return;
-    }
+#define GIRV_REF_6AG  (0x0207)  // 6 axis Game Rotation Vector 
+#define GIRV_REF_9AGM (0x0204)  // 9 axis Absolute Rotation Vector
+#define GIRV_MAX_ERR FIX_Q(29, (30.0 * scaleDegToRad)) // max error: 30 degrees
+#define GIRV_ALPHA FIX_Q(20, 0.303072543909142)        // pred param alpha
+#define GIRV_BETA  FIX_Q(20, 0.113295896384921)        // pred param beta
+#define GIRV_GAMMA FIX_Q(20, 0.002776219713054)        // pred param gamma
 
-    // Report the results
-    for (int n = 0; n < SH2_NUM_PROD_ID_ENTRIES; n++) {
-        printf("Part %d : Version %d.%d.%d Build %d\n",
-               prodIds.entry[n].swPartNumber,
-               prodIds.entry[n].swVersionMajor, prodIds.entry[n].swVersionMinor, 
-               prodIds.entry[n].swVersionPatch, prodIds.entry[n].swBuildNumber);
-    }
+#ifdef CONFIGURE_HMD
+    // Enable GIRV prediction for 28ms with 100Hz sync
+    #define GIRV_SYNC_INTERVAL (10000)                     // sync interval: 10000 uS (100Hz)
+    #define GIRV_PRED_AMT FIX_Q(10, 0.028)                 // prediction amt: 28ms
+#else
+    // Disable GIRV prediction
+    #define GIRV_SYNC_INTERVAL (0)                     // sync interval: 0 (disables prediction)
+    #define GIRV_PRED_AMT FIX_Q(10, 0.0)               // prediction amt: 0
+#endif
 
-}
 
-static void configureForDefault(void)
+static void configure(void)
 {
     int status = SH2_OK;
     uint32_t config[7];
+    
+    // Note: The call to sh2_setFrs below updates a non-volatile FRS record
+    // so it will remain in effect even after the sensor hub reboots.  It's not strictly
+    // necessary to repeat this step every time the system starts up as we are doing
+    // in this example code.
     
     // Configure prediction parameters for Gyro-Integrated Rotation Vector.
     // See section 4.3.24 of the SH-2 Reference Manual for a full explanation.
     // ...
     config[0] = GIRV_REF_6AG;           // Reference Data Type
-    config[1] = (uint32_t)0;            // Synchronization Interval (0 disables prediction)
-    config[2] = (uint32_t)DFLT_MAX_ERR;  // Maximum error
-    config[3] = (uint32_t)DFLT_PRED_AMT; // Prediction Amount
-    config[4] = (uint32_t)DFLT_ALPHA;    // Alpha
-    config[5] = (uint32_t)DFLT_BETA;     // Beta
-    config[6] = (uint32_t)DFLT_GAMMA;    // Gamma
+    config[1] = (uint32_t)GIRV_SYNC_INTERVAL; // Synchronization Interval
+    config[2] = (uint32_t)GIRV_MAX_ERR;  // Maximum error
+    config[3] = (uint32_t)GIRV_PRED_AMT; // Prediction Amount
+    config[4] = (uint32_t)GIRV_ALPHA;    // Alpha
+    config[5] = (uint32_t)GIRV_BETA;     // Beta
+    config[6] = (uint32_t)GIRV_GAMMA;    // Gamma
     status = sh2_setFrs(FRS_ID_META_GYRO_INTEGRATED_RV, config, sizeof(config)/sizeof(uint32_t));
     if (status != SH2_OK) {
-        printf("Error: %d, from sh2_setFrs() in configureForDefault.\n", status);
+        printf("Error: %d, from sh2_setFrs() in configure().\n", status);
     }
 
-    // Note: The configuration step performed above updates a non-volatile FRS record
-    // so it will remain in effect even after the sensor hub reboots.  It's not strictly
-    // necessary to repeat this step every time the system starts up as we are doing
-    // in this example code.
-    //
-    // The calibration config performed below, however, is not retained in non-volatile
-    // storage.  It only remains in effect until the sensor hub reboots.
+    // The sh2_setCalConfig does not update non-volatile storage.  This
+    // only remains in effect until the sensor hub reboots.
 
     // Enable dynamic calibration for A, G and M sensors
     status = sh2_setCalConfig(SH2_CAL_ACCEL | SH2_CAL_GYRO | SH2_CAL_MAG);
     if (status != SH2_OK) {
-        printf("Error: %d, from sh2_setCalConfig() in configureForDefault.\n", status);
-    }
-}
-
-static void configureForHmd(void)
-{
-    int status = SH2_OK;
-    uint32_t config[7];
-    
-    // Configure prediction parameters for Gyro-Integrated Rotation Vector.
-    // See section 4.3.24 of the SH-2 Reference Manual for a full explanation.
-    // ...
-    config[0] = GIRV_REF_6AG;           // Reference Data Type
-    config[1] = (uint32_t)HMD_SYNC_INTERVAL; // Synchronization Interval
-    config[2] = (uint32_t)HMD_MAX_ERR;  // Maximum error
-    config[3] = (uint32_t)HMD_PRED_AMT; // Prediction Amount
-    config[4] = (uint32_t)HMD_ALPHA;    // Alpha
-    config[5] = (uint32_t)HMD_BETA;     // Beta
-    config[6] = (uint32_t)HMD_GAMMA;    // Gamma
-    status = sh2_setFrs(FRS_ID_META_GYRO_INTEGRATED_RV, config, sizeof(config)/sizeof(uint32_t));
-    if (status != SH2_OK) {
-        printf("Error: %d, from sh2_setFrs() in configureForHmd.\n", status);
-    }
-
-    // Note: The configuration step performed above updates a non-volatile FRS record
-    // so it will remain in effect even after the sensor hub reboots.  It's not strictly
-    // necessary to repeat this step every time the system starts up as we are doing
-    // in this example code.
-    //
-    // The calibration config performed below, however, is not retained in non-volatile
-    // storage.  It only remains in effect until the sensor hub reboots.
-
-    // Enable dynamic calibration for A, G and M sensors
-    status = sh2_setCalConfig(SH2_CAL_ACCEL | SH2_CAL_GYRO | SH2_CAL_MAG);
-    if (status != SH2_OK) {
-        printf("Error: %d, from sh2_setCalConfig() in configureForHmd.\n", status);
+        printf("Error: %d, from sh2_setCalConfig() in configure().\n", status);
     }
 }
 
@@ -311,6 +258,7 @@ static void startReports(void)
     }
 }
 
+#ifdef DSF_OUTPUT
 static void printDsfHeaders(void)
 {
     printf("+%d TIME[x]{s}, SAMPLE_ID[x]{samples}, ANG_POS_GLOBAL[rijk]{quaternion}, ANG_POS_ACCURACY[x]{rad}\n",
@@ -432,6 +380,30 @@ static void printDsf(const sh2_SensorEvent_t * event)
             break;
     }
 }
+#endif
+
+#ifndef DSF_OUTPUT
+static void reportProdIds(void)
+{
+    int status;
+    
+    memset(&prodIds, 0, sizeof(prodIds));
+    status = sh2_getProdIds(&prodIds);
+    
+    if (status < 0) {
+        printf("Error from sh2_getProdIds.\n");
+        return;
+    }
+
+    // Report the results
+    for (int n = 0; n < SH2_NUM_PROD_ID_ENTRIES; n++) {
+        printf("Part %d : Version %d.%d.%d Build %d\n",
+               prodIds.entry[n].swPartNumber,
+               prodIds.entry[n].swVersionMajor, prodIds.entry[n].swVersionMinor, 
+               prodIds.entry[n].swVersionPatch, prodIds.entry[n].swBuildNumber);
+    }
+
+}
 
 static void printEvent(const sh2_SensorEvent_t * event)
 {
@@ -493,5 +465,6 @@ static void printEvent(const sh2_SensorEvent_t * event)
             break;
     }
 }
+#endif
 
 

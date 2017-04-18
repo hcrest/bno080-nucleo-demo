@@ -33,7 +33,7 @@
 
 
 #include "stm32f4xx_hal.h"
-#include "mxconstants.h"
+#include "main.h"
 #include "cmsis_os.h"
 #include "FreeRTOS.h"
 #include "task.h"
