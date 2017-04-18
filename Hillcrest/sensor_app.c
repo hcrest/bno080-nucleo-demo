@@ -34,11 +34,15 @@
 #include "sh2_err.h"
 #include "sh2_SensorValue.h"
 
+#ifndef ARRAY_LEN
+#define ARRAY_LEN(a) (sizeof(a)/sizeof(a[0]))
+#endif
+
 // Define this to produce DSF data for logging
 // #define DSF_OUTPUT
 
 // Define this to perform fimware update at startup.
-#define PERFORM_DFU
+// #define PERFORM_DFU
 
 // Define this to use HMD-appropriate configuration.
 // #define CONFIGURE_HMD
@@ -218,7 +222,7 @@ static void configure(void)
     config[4] = (uint32_t)GIRV_ALPHA;    // Alpha
     config[5] = (uint32_t)GIRV_BETA;     // Beta
     config[6] = (uint32_t)GIRV_GAMMA;    // Gamma
-    status = sh2_setFrs(FRS_ID_META_GYRO_INTEGRATED_RV, config, sizeof(config)/sizeof(uint32_t));
+    status = sh2_setFrs(GYRO_INTEGRATED_RV_CONFIG, config, ARRAY_LEN(config));
     if (status != SH2_OK) {
         printf("Error: %d, from sh2_setFrs() in configure().\n", status);
     }
