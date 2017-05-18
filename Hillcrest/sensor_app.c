@@ -42,7 +42,7 @@
 // #define DSF_OUTPUT
 
 // Define this to perform fimware update at startup.
-// #define PERFORM_DFU
+#define PERFORM_DFU
 
 // Define this to use HMD-appropriate configuration.
 // #define CONFIGURE_HMD
@@ -123,8 +123,11 @@ void demoTaskStart(const void * params)
     // Register event listener
     sh2_setSensorCallback(sensorHandler, NULL);
 
-    while (!resetPerformed) {
+    // wait for reset notification, or just go ahead after 100ms
+    int waited = 0;
+    while (!resetPerformed && (waited < 200)) {
         vTaskDelay(1);
+        waited++;
     }
 
 #ifdef DSF_OUTPUT
@@ -134,6 +137,14 @@ void demoTaskStart(const void * params)
     // Read and display BNO080 product ids
     reportProdIds();
 #endif
+
+    // Configure some parameters of the BNO080:
+    // Gyro Integrated Rotation Vector prediction and dynamic
+    // calibration settings.
+    configure();
+            
+    // Enable reports from Rotation Vector.
+    startReports();
 
     // Process sensors forever
     while (1) {

@@ -27,12 +27,15 @@
 #include <FreeRTOS.h>
 #include <semphr.h>
 
+#include "usart.h"
+
 #define CONSOLE_BUFLEN (128)
 
 // ------------------------------------------------------------------------
 // Private state variables
 
 // The UART used by the console
+UART_HandleTypeDef huart2;
 UART_HandleTypeDef *console_huart = 0;
 
 // Transmit state
@@ -63,13 +66,31 @@ unsigned rxDrops;
 
 void startTx(void);
 void startTxIsr(void);
+static void consoleRxCplt(UART_HandleTypeDef *huart);
+static void consoleTxCplt(UART_HandleTypeDef *huart);
 
 // ------------------------------------------------------------------------
 // Public API
 
-void console_init(UART_HandleTypeDef *huart)
+void console_init(void)
 {
-	console_huart = huart;
+    huart2.Instance = USART2;
+    huart2.Init.BaudRate = 115200;
+    huart2.Init.WordLength = UART_WORDLENGTH_8B;
+    huart2.Init.StopBits = UART_STOPBITS_1;
+    huart2.Init.Parity = UART_PARITY_NONE;
+    huart2.Init.Mode = UART_MODE_TX_RX;
+    huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+    huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+    if (HAL_UART_Init(&huart2) != HAL_OK)
+    {
+        // Should not happen, debug!
+        while(1);
+    }
+    
+    console_huart = &huart2;
+
+    usartRegister(console_huart, consoleRxCplt, consoleTxCplt);
 
 	txActive = false;
 	txBlocked = false;
@@ -87,6 +108,9 @@ void console_init(UART_HandleTypeDef *huart)
 	rxNextOut = 0;  // rxBuffer empty when rxNextIn == rxNextOut
 	rxDrops = 0;
 	rxActive = false;
+
+    // Enable interrupts now that we're ready.
+    HAL_NVIC_EnableIRQ(USART2_IRQn);
 }
 
 size_t __read(int Handle, unsigned char * Buf, size_t BufSize)
@@ -260,7 +284,7 @@ static void startTxIsr(void)
 	portYIELD_FROM_ISR(woken);
 }
 
-void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+void consoleTxCplt(UART_HandleTypeDef *huart)
 {
 	if (huart->Instance == USART2) {
 		// One transmission is complete.
@@ -275,7 +299,7 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 	}
 }
 
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+static void consoleRxCplt(UART_HandleTypeDef *huart)
 {
 	BaseType_t woken = pdFALSE;
 	

@@ -44,6 +44,8 @@
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f4xx_hal.h"
 
+extern DMA_HandleTypeDef hdma_usart1_rx;
+
 extern void Error_Handler(void);
 /* USER CODE BEGIN 0 */
 #include "console.h"
@@ -209,37 +211,84 @@ void HAL_SPI_MspDeInit(SPI_HandleTypeDef* hspi)
 
 void HAL_UART_MspInit(UART_HandleTypeDef* huart)
 {
+    GPIO_InitTypeDef GPIO_InitStruct;
+    if(huart->Instance==USART1)
+    {
+        /* USER CODE BEGIN USART1_MspInit 0 */
 
-  GPIO_InitTypeDef GPIO_InitStruct;
-  if(huart->Instance==USART2)
-  {
-  /* USER CODE BEGIN USART2_MspInit 0 */
-
-	  console_init(huart);
-
-  /* USER CODE END USART2_MspInit 0 */
-    /* Peripheral clock enable */
-    __HAL_RCC_USART2_CLK_ENABLE();
+        /* USER CODE END USART1_MspInit 0 */
+        /* Peripheral clock enable */
+        __HAL_RCC_USART1_CLK_ENABLE();
   
-    /**USART2 GPIO Configuration    
-    PA2     ------> USART2_TX
-    PA3     ------> USART2_RX 
-    */
-    GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_3;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull = GPIO_PULLUP;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+        /**USART1 GPIO Configuration    
+           PA9     ------> USART1_TX
+           PB7     ------> USART1_RX 
+        */
+        GPIO_InitStruct.Pin = GPIO_PIN_9;
+        GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+        GPIO_InitStruct.Pull = GPIO_PULLUP;
+        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+        GPIO_InitStruct.Alternate = GPIO_AF7_USART1;
+        HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+        
+        GPIO_InitStruct.Pin = GPIO_PIN_7;
+        GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+        GPIO_InitStruct.Pull = GPIO_PULLUP;
+        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+        GPIO_InitStruct.Alternate = GPIO_AF7_USART1;
+        HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-    /* Peripheral interrupt init */
-    HAL_NVIC_SetPriority(USART2_IRQn, 5, 0);
-    HAL_NVIC_EnableIRQ(USART2_IRQn);
-  /* USER CODE BEGIN USART2_MspInit 1 */
+        /* Peripheral DMA init*/
+  
+        hdma_usart1_rx.Instance = DMA2_Stream2;
+        hdma_usart1_rx.Init.Channel = DMA_CHANNEL_4;
+        hdma_usart1_rx.Init.Direction = DMA_PERIPH_TO_MEMORY;
+        hdma_usart1_rx.Init.PeriphInc = DMA_PINC_DISABLE;
+        hdma_usart1_rx.Init.MemInc = DMA_MINC_ENABLE;
+        hdma_usart1_rx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+        hdma_usart1_rx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+        hdma_usart1_rx.Init.Mode = DMA_CIRCULAR;
+        hdma_usart1_rx.Init.Priority = DMA_PRIORITY_LOW;
+        hdma_usart1_rx.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
+        if (HAL_DMA_Init(&hdma_usart1_rx) != HAL_OK)
+        {
+            Error_Handler();
+        }
 
-  /* USER CODE END USART2_MspInit 1 */
-  }
+        __HAL_LINKDMA(huart,hdmarx,hdma_usart1_rx);
+        
+        /* Peripheral interrupt init */
+        HAL_NVIC_SetPriority(USART1_IRQn, 5, 0);
+        /* USER CODE BEGIN USART2_MspInit 1 */
 
+        /* USER CODE END USART2_MspInit 1 */
+    }
+
+    if(huart->Instance==USART2)
+    {
+        /* USER CODE BEGIN USART2_MspInit 0 */
+
+        /* USER CODE END USART2_MspInit 0 */
+        /* Peripheral clock enable */
+        __HAL_RCC_USART2_CLK_ENABLE();
+  
+        /**USART2 GPIO Configuration    
+           PA2     ------> USART2_TX
+           PA3     ------> USART2_RX 
+        */
+        GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_3;
+        GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+        GPIO_InitStruct.Pull = GPIO_PULLUP;
+        GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+        GPIO_InitStruct.Alternate = GPIO_AF7_USART2;
+        HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+        /* Peripheral interrupt init */
+        HAL_NVIC_SetPriority(USART2_IRQn, 5, 0);
+        /* USER CODE BEGIN USART2_MspInit 1 */
+
+        /* USER CODE END USART2_MspInit 1 */
+    }
 }
 
 void HAL_UART_MspDeInit(UART_HandleTypeDef* huart)

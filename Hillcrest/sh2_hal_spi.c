@@ -26,7 +26,6 @@
 
 #include <string.h>
 
-#include "sh2_hal_spi.h"
 #include "sh2_hal.h"
 #include "sh2_err.h"
 #include "dbg.h"
@@ -76,6 +75,7 @@ typedef enum {
 } TransferPhase_t;
 
 // SPI Bus access
+static SPI_HandleTypeDef hspi1;
 static SPI_HandleTypeDef *hspi;
 static SemaphoreHandle_t spiMutex;
 static int spiOpStatus;
@@ -154,10 +154,29 @@ static void delayUs(uint32_t count);
 // Public API
 // ----------------------------------------------------------------------------------
 // Initialize SH-2 HAL subsystem
-void sh2_hal_init(SPI_HandleTypeDef* _hspi) 
+void sh2_hal_init()
 {
+    hspi1.Instance = SPI1;
+    hspi1.Init.Mode = SPI_MODE_MASTER;
+    hspi1.Init.Direction = SPI_DIRECTION_2LINES;
+    hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+    hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;
+    hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
+    hspi1.Init.NSS = SPI_NSS_SOFT;
+    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
+    hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
+    hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+    hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+    hspi1.Init.CRCPolynomial = 10;
+    if (HAL_SPI_Init(&hspi1) != HAL_OK)
+    {
+        // This should not have happened, debug it.
+        while(1);
+    }
+    
+    // TODO-DW 
     // Store reference to SPI peripheral
-    hspi = _hspi;
+    hspi = &hspi1;
 
     spiReset(false);
 
@@ -236,6 +255,9 @@ int sh2_hal_reset(bool dfuMode,
 
     // Wait for reset to take effect
     vTaskDelay(RESET_DELAY); 
+       
+    // Enable INTN interrupt
+    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
        
     // Deassert reset
     dev.rstn(1);
@@ -394,6 +416,14 @@ void HAL_SPI_ErrorCallback(SPI_HandleTypeDef * hspi)
     xQueueSendFromISR(evtQueue, &event, &woken);
     
     portEND_SWITCHING_ISR(woken);
+}
+
+/**
+* @brief This function handles SPI1 global interrupt.
+*/
+void SPI1_IRQHandler(void)
+{
+  HAL_SPI_IRQHandler(&hspi1);
 }
 
 // ----------------------------------------------------------------------------------

@@ -26,6 +26,6 @@
 
 #include "stm32f4xx_hal.h"
 
-void console_init(UART_HandleTypeDef* huart);
+void console_init(void);
 
 #endif

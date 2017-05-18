@@ -25,7 +25,6 @@
 
 #include <string.h>
 
-#include "sh2_hal_i2c.h"
 #include "sh2_hal.h"
 #include "shtp.h"
 #include "sh2_err.h"
@@ -69,6 +68,7 @@ static void bootn0(bool state);
 // ----------------------------------------------------------------------------------
 
 // I2C Bus access
+static I2C_HandleTypeDef hi2c1;
 static I2C_HandleTypeDef *hi2c;
 static SemaphoreHandle_t i2cMutex;
 static SemaphoreHandle_t i2cBlockSem;
@@ -104,10 +104,25 @@ typedef struct {
 // Public API
 // ----------------------------------------------------------------------------------
 // Initialize SH-2 HAL subsystem
-void sh2_hal_init(I2C_HandleTypeDef* _hi2c) 
+void sh2_hal_init(void)
 {
+    hi2c1.Instance = I2C1;
+    hi2c1.Init.ClockSpeed = 400000;
+    hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
+    hi2c1.Init.OwnAddress1 = 0;
+    hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+    hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+    hi2c1.Init.OwnAddress2 = 0;
+    hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+    hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+    if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+    {
+        // This should not happen, debug it.
+        while (1);
+    }
+    
     // Store reference to I2C peripheral
-    hi2c = _hi2c;
+    hi2c = &hi2c1;
 
     // Need to init I2C peripheral before first use.
     i2cResetNeeded = true;
@@ -165,9 +180,11 @@ int sh2_hal_reset(bool dfuMode,
     // Set BOOTN according to dfuMode
     sh2Hal.bootn(dfuMode ? 0 : 1);
 
-
     // Wait for reset to take effect
-    vTaskDelay(RESET_DELAY); 
+    vTaskDelay(RESET_DELAY);
+
+    // Enable INTN interrupt
+    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
        
     // Deassert reset
     sh2Hal.rstn(1);
@@ -279,6 +296,22 @@ void HAL_I2C_ErrorCallback(I2C_HandleTypeDef * hi2c)
     xSemaphoreGiveFromISR(i2cBlockSem, &woken);
     
     portEND_SWITCHING_ISR(woken);
+}
+
+/**
+* @brief This function handles I2C1 event interrupt.
+*/
+void I2C1_EV_IRQHandler(void)
+{
+    HAL_I2C_EV_IRQHandler(&hi2c1);
+}
+
+/**
+* @brief This function handles I2C1 error interrupt.
+*/
+void I2C1_ER_IRQHandler(void)
+{
+    HAL_I2C_ER_IRQHandler(&hi2c1);
 }
 
 // ----------------------------------------------------------------------------------
