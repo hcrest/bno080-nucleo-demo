@@ -47,6 +47,7 @@
 
 /* USER CODE BEGIN Includes */
 #include "sensor_app.h"
+#include "console.h"
 #include "dbg.h"
 
 extern void sh2_hal_init(void);
@@ -264,6 +265,16 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(SH_CSN_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : SH_CLKSEL0_Pin */
+  GPIO_InitStruct.Pin = SH_CLKSEL0_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(SH_CLKSEL0_GPIO_Port, &GPIO_InitStruct);
+
+  /* Set CLKSEL0 to 0 : BNO080 should use crystal for timing. */
+  HAL_GPIO_WritePin(SH_CLKSEL0_GPIO_Port, SH_CLKSEL0_Pin, GPIO_PIN_RESET);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);

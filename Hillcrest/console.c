@@ -90,7 +90,7 @@ void console_init(void)
     
     console_huart = &huart2;
 
-    usartRegister(console_huart, consoleRxCplt, consoleTxCplt);
+    usartRegisterHandlers(console_huart, consoleRxCplt, consoleTxCplt);
 
 	txActive = false;
 	txBlocked = false;

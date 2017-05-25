@@ -42,7 +42,7 @@
 // #define DSF_OUTPUT
 
 // Define this to perform fimware update at startup.
-#define PERFORM_DFU
+// #define PERFORM_DFU
 
 // Define this to use HMD-appropriate configuration.
 // #define CONFIGURE_HMD
@@ -417,7 +417,6 @@ static void reportProdIds(void)
                prodIds.entry[n].swVersionMajor, prodIds.entry[n].swVersionMinor, 
                prodIds.entry[n].swVersionPatch, prodIds.entry[n].swBuildNumber);
     }
-
 }
 
 static void printEvent(const sh2_SensorEvent_t * event)

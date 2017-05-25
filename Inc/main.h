@@ -47,6 +47,9 @@
 
 /* USER CODE BEGIN Includes */
 
+#define SH_CLKSEL0_Pin GPIO_PIN_8
+#define SH_CLKSEL0_GPIO_Port GPIOA
+
 /* USER CODE END Includes */
 
 /* Private define ------------------------------------------------------------*/

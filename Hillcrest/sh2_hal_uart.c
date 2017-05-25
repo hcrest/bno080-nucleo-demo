@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-/**
+/*
  * @file sh2_hal_uart.c
  * @author David Wheeler
  * @date 20 Apr 2017
@@ -29,7 +29,6 @@
 #include "sh2_hal.h"
 #include "sh2_err.h"
 #include "dbg.h"
-
 
 #include "stm32f4xx_hal.h"
 #include "main.h"
@@ -48,9 +47,6 @@
 #define DFU_BPS (115200)             // 115200 bps for DFU
 #define SH2_BPS (3000000)            // 3Mbps for BNO080 UART-SHTP
 
-#define MAX_EVENTS (16)
-#define SHTP_HEADER_LEN (4)
-
 #define RSTN_GPIO_PORT GPIOB
 #define RSTN_GPIO_PIN  GPIO_PIN_4
 
@@ -62,8 +58,6 @@
 
 #define WAKEN_GPIO_PORT SH_WAKEN_GPIO_Port // from STM32Cube pin config via mxconstants.h
 #define WAKEN_GPIO_PIN  SH_WAKEN_Pin
-
-#define TIMESTAMP_0 (0)
 
 #define PROTOCOL_CONTROL (0)
 #define PROTOCOL_SHTP (1)
@@ -90,70 +84,64 @@ DMA_HandleTypeDef hdma_usart1_rx;
 // USART1 handle
 UART_HandleTypeDef huart1;
 
+// Flag to coordinate reset operations between tasks.
 bool sh2HalResetting = false;
 
 // receive support
-static bool rxReceivedData = false;
-static uint32_t rxIndex = 0;
-static uint8_t rxBuffer[256];
-static volatile uint32_t rxChars;
-static volatile uint32_t rxEvents;
-static RxState_t rxState;
+static bool rxReceivedData = false;  // tells rx task to process rx data
+static uint8_t rxBuffer[256];        // receives UART data via DMA
+static uint32_t rxIndex = 0;         // next index to read
 
 // Receive frame
 #define MAX_FRAME_LEN 1024
-static uint8_t rxFrame[MAX_FRAME_LEN];
-static uint32_t rxFrameLen = 0;
-static bool rxFrameOverflowed = false;
-static uint32_t rxOverflowFrames = 0;
-static uint32_t rxUnkProtocol = 0;
+static uint8_t rxFrame[MAX_FRAME_LEN]; // receives RFC1662 decoded frame
+static uint32_t rxFrameLen = 0;        // length of frame so far
+static RxState_t rxState;              // RFC1662 decoder state
+static bool rxFrameOverflowed = false; // Becomes true on overflow
 
 // Transmit support
-static SemaphoreHandle_t txFrameBufSem;
 #define MAX_TX_FRAME_LEN (SH2_HAL_MAX_TRANSFER*2)
-static uint8_t txFrame[MAX_TX_FRAME_LEN];
-static uint32_t txFrameLen;
-static uint16_t txBsnAvail = 0;
+static uint8_t txFrame[MAX_TX_FRAME_LEN];// tx frame buffer
+static uint32_t txFrameLen;              // length of frame in txFrame[]
+static SemaphoreHandle_t txFrameBufSem;  // to serialize access to tx frame buf.
+static uint16_t txBsnAvail = 0;          // Length of frame we're allowed to send
 
 // Buffer Status Query message
 static const uint8_t bsq[] = {RFC1662_FLAG, PROTOCOL_CONTROL, RFC1662_FLAG};
 
-// UART access
+// Statistics (for debugging)
+static uint32_t rxOverflowFrames = 0;  // Counter of overflow incidents
+static uint32_t rxUnkProtocol = 0;     // Counter of unknown protocol ids
 
 // HAL Tasks
-static SemaphoreHandle_t txTaskHasWork;
-static osThreadId txTaskHandle;
+static SemaphoreHandle_t txTaskHasWork; // signals tx task to handle event
+static osThreadId txTaskHandle;         // tx task handle
 
-static SemaphoreHandle_t rxTaskHasWork;
-static osThreadId rxTaskHandle;
-static TimerHandle_t rxTimer;
+static SemaphoreHandle_t rxTaskHasWork; // signals rx task to handle event
+static osThreadId rxTaskHandle;         // rx task handle
+static TimerHandle_t rxTimer;           // timer to check DMA periodically
 
-static uint32_t rxTimestamp_uS;
+static uint32_t rxTimestamp_uS;         // timestamp of INTN event
 
-typedef struct {
-    bool dfuMode;
-    void (*rstn)(bool);
-    void (*bootn)(bool);
+// mode flag from last reset operation
+static bool dfuMode = false;
 
-    // client callback support
-    sh2_rxCallback_t *onRx;
-    void *onRxCookie;
+// client callback support
+static sh2_rxCallback_t *onRx;
+static void *onRxCookie;
 
-    SemaphoreHandle_t blockSem;
+// Semaphore supporting sh2_hal_block/unblock operations
+static SemaphoreHandle_t blockSem;
     
-} Sh2Hal_t;
-static Sh2Hal_t sh2Hal;
-
 // ----------------------------------------------------------------------------------
 // Forward declarations
 // ----------------------------------------------------------------------------------
-static int usart_init(uint32_t baudrate);
+static int setupUsart(uint32_t baudrate);
 static void rxTask(const void *params);
 static void txTask(const void *params);
-static void rstn0(bool state);
-static void bootn0(bool state);
-static void sh2HalRxCplt(UART_HandleTypeDef *huart);
-static void sh2HalTxCplt(UART_HandleTypeDef *huart);
+static void rstn(bool state);
+static void bootn(bool state);
+static void onRxCplt(UART_HandleTypeDef *huart);
 static void onRxTimer(TimerHandle_t t);
 static void rxResetFrame(void);
 static uint32_t rfc1662Encode(uint8_t *buf, uint32_t bufLen,
@@ -166,35 +154,27 @@ static uint32_t rfc1662Encode(uint8_t *buf, uint32_t bufLen,
 // Initialize SH-2 HAL subsystem
 void sh2_hal_init(void) 
 {
-    // Initialize SH2 device
-    memset(&sh2Hal, 0, sizeof(sh2Hal));
+    dfuMode = false;
+    rstn(false);  // Hold in reset
+    bootn(!dfuMode);  // SH-2, not DFU
+
+    // register for rx, tx callbacks
+    usartRegisterHandlers(&huart1, onRxCplt, 0);
 
     // Semaphore to block clients with block/unblock API
-    sh2Hal.blockSem = xSemaphoreCreateBinary();
+    blockSem = xSemaphoreCreateBinary();
 
-    sh2Hal.rstn = rstn0;
-    sh2Hal.bootn = bootn0;
-
-    sh2Hal.rstn(false);  // Hold in reset
-    sh2Hal.bootn(true);  // SH-2, not DFU
-
-    // Create timer for polling for rx characters.
+    // Initialize rx task resources
     rxTimer = xTimerCreate("rxTimer", 1, pdTRUE, 0, onRxTimer);
-
-    // Create signal to wake rx task.
     rxTaskHasWork = xSemaphoreCreateBinary();
-    
-    // Initialize tx task resources
-    txTaskHasWork = xSemaphoreCreateBinary();
-    txFrameBufSem = xSemaphoreCreateBinary();
-    txFrameLen = 0;
-    xSemaphoreGive(txFrameBufSem);
-    
-    // register for rx, tx callbacks
-    usartRegister(&huart1, sh2HalRxCplt, sh2HalTxCplt);
-
     rxResetFrame();
     rxState = OUTSIDE_FRAME;
+    
+    // Initialize tx task resources
+    txFrameLen = 0;
+    txTaskHasWork = xSemaphoreCreateBinary();
+    txFrameBufSem = xSemaphoreCreateBinary();
+    xSemaphoreGive(txFrameBufSem);
     
     // Create rx task
     osThreadDef(rxThreadDef, rxTask, osPriorityNormal, 1, 2048);
@@ -209,52 +189,53 @@ void sh2_hal_init(void)
     if (txTaskHandle == NULL) {
         printf("Failed to create SH-2 HAL tx task.\n");
     }
+    
+    // Enable INTN interrupt
+    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 }
 
 // Reset an SH-2 module (into DFU mode, if flag is true)
 // The onRx callback function is registered with the HAL at the same time.
-int sh2_hal_reset(bool dfuMode,
-                  sh2_rxCallback_t *onRx,
+int sh2_hal_reset(bool _dfuMode,
+                  sh2_rxCallback_t *_onRx,
                   void *cookie)
 {
     // Store params
-    sh2Hal.onRxCookie = cookie;
-    sh2Hal.onRx = onRx;
-    sh2Hal.dfuMode = dfuMode;
+    onRxCookie = cookie;
+    onRx = _onRx;
+    dfuMode = _dfuMode;
 
     // Assert reset
-    sh2Hal.rstn(0);
+    rstn(0);
+
+    // Set BOOTN according to dfuMode
+    bootn(!dfuMode);
+
+    // Notify tasks that HAL is resetting
     sh2HalResetting = true;
-            
     xSemaphoreGive(rxTaskHasWork);
     xSemaphoreGive(txTaskHasWork);
         
-    // Set BOOTN according to dfuMode
-    sh2Hal.bootn(dfuMode ? 0 : 1);
-
     // Wait for reset to take effect
     vTaskDelay(RESET_DELAY);
 
     // === During this interval, txTask, rxTask process reset event ===
 
     // Initialize USART peripheral
-    if (sh2Hal.dfuMode) {
-        usart_init(DFU_BPS);
+    if (dfuMode) {
+        setupUsart(DFU_BPS);
     }
     else {
-        usart_init(SH2_BPS);
+        setupUsart(SH2_BPS);
     }
 
     sh2HalResetting = false;
     
-    // Enable INTN interrupt
-    HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-       
     // Deassert reset
-    sh2Hal.rstn(1);
+    rstn(1);
 
     // If reset into DFU mode, wait until bootloader should be ready
-    if (sh2Hal.dfuMode) {
+    if (dfuMode) {
         vTaskDelay(DFU_BOOT_DELAY);
     }
 
@@ -264,12 +245,11 @@ int sh2_hal_reset(bool dfuMode,
 // Send data to SH-2
 int sh2_hal_tx(uint8_t *pData, uint32_t len)
 {
-    
-    if (!sh2Hal.dfuMode) {
-        // Get semaphore for tx frame buffer
-        // (If an earlier tx is still in progress, this will block.)
-        xSemaphoreTake(txFrameBufSem, portMAX_DELAY);
+    // Get semaphore for tx frame buffer
+    // (If an earlier tx is still in progress, this will block.)
+    xSemaphoreTake(txFrameBufSem, portMAX_DELAY);
 
+    if (!dfuMode) {
         // Write contents of frame buffer
         uint32_t encLen = rfc1662Encode(txFrame, sizeof(txFrame), PROTOCOL_SHTP, pData, len);
         if (encLen == 0) {
@@ -285,7 +265,7 @@ int sh2_hal_tx(uint8_t *pData, uint32_t len)
         txFrameLen = len;
     }
 
-    // Signal tx task that a frame is ready
+    // Signal tx task that a frame is ready to send
     xSemaphoreGive(txTaskHasWork);
     
     return SH2_OK;
@@ -296,6 +276,11 @@ int sh2_hal_tx(uint8_t *pData, uint32_t len)
 // if return value was SH2_OK.
 int sh2_hal_rx(uint8_t* pData, uint32_t len)
 {
+    // NOTE: sh2_hal_rx is only called in DFU mode.
+    if (!dfuMode) {
+        return SH2_ERR_BAD_PARAM;
+    }
+    
     // Clear received frame
     rxFrameLen = 0;
 
@@ -317,14 +302,14 @@ int sh2_hal_rx(uint8_t* pData, uint32_t len)
 
 int sh2_hal_block(void)
 {
-    xSemaphoreTake(sh2Hal.blockSem, portMAX_DELAY);
+    xSemaphoreTake(blockSem, portMAX_DELAY);
 
     return SH2_OK;
 }
 
 int sh2_hal_unblock(void)
 {
-    xSemaphoreGive(sh2Hal.blockSem);
+    xSemaphoreGive(blockSem);
 
     return SH2_OK;
 }
@@ -360,17 +345,16 @@ void DMA2_Stream2_IRQHandler(void)
   /* USER CODE END DMA2_Stream2_IRQn 1 */
 }
 
+void HAL_UART_RxHalfCpltCallback(UART_HandleTypeDef *huart)
+{
+    onRxCplt(huart);
+}
 
 // ----------------------------------------------------------------------------------
 // Private functions
 // ----------------------------------------------------------------------------------
 
-void HAL_UART_RxHalfCpltCallback(UART_HandleTypeDef *huart)
-{
-    sh2HalRxCplt(huart);
-}
-
-static void sh2HalRxCplt(UART_HandleTypeDef *huart)
+static void onRxCplt(UART_HandleTypeDef *huart)
 {
     BaseType_t woken = pdFALSE;
     
@@ -387,17 +371,11 @@ static void onRxTimer(TimerHandle_t t)
     xSemaphoreGive(rxTaskHasWork);
 }
 
-static void sh2HalTxCplt(UART_HandleTypeDef *huart)
-{
-    // TODO-DW
-}
-
-static int usart_init(uint32_t baudrate)
+static int setupUsart(uint32_t baudrate)
 {
     HAL_NVIC_DisableIRQ(DMA2_Stream2_IRQn);
     HAL_NVIC_DisableIRQ(USART1_IRQn);
 
-#if 1
     hdma_usart1_rx.Instance = DMA2_Stream2;
     hdma_usart1_rx.Init.Channel = DMA_CHANNEL_4;
     hdma_usart1_rx.Init.Direction = DMA_PERIPH_TO_MEMORY;
@@ -410,11 +388,10 @@ static int usart_init(uint32_t baudrate)
     hdma_usart1_rx.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
     if (HAL_DMA_Init(&hdma_usart1_rx) != HAL_OK)
     {
-        Error_Handler();
+        return SH2_ERR_IO;
     }
 
     __HAL_LINKDMA(&huart1,hdmarx,hdma_usart1_rx);
-#endif
         
     huart1.Instance = USART1;
     huart1.Init.BaudRate = baudrate;
@@ -475,7 +452,7 @@ static void rxProcFrame(void)
     }
     else if (rxFrame[0] == PROTOCOL_SHTP) {
         // SHTP Payload, deliver it to client
-        sh2Hal.onRx(sh2Hal.onRxCookie, rxFrame+1, rxFrameLen-1, rxTimestamp_uS);
+        onRx(onRxCookie, rxFrame+1, rxFrameLen-1, rxTimestamp_uS);
     }
     else {
         // Unknown protocol?
@@ -560,7 +537,6 @@ static void rxTask(const void *params)
             }
 
             // Restart receive process
-            /// rxIndex = 0;
             rxResetFrame();
             rxState = OUTSIDE_FRAME;
             rxReceivedData = false;
@@ -576,7 +552,7 @@ static void rxTask(const void *params)
 
             // Process chars, incrementing rxIndex, until it reaches stop point
             while (rxIndex != stopPoint) {
-                if (!sh2Hal.dfuMode) {
+                if (!dfuMode) {
                     rxCharShtp(rxBuffer[rxIndex]);
                 }
                 else {
@@ -612,10 +588,13 @@ static void txTask(const void *params)
 
         if (sh2HalResetting) {
             // Perform RESET actions
-            rxFrameLen = 0;
-            rxFrameOverflowed = false;
+            rxResetFrame();
             txBsnAvail = 0;
 
+            // Clear tx frame buffer
+            txFrameLen = 0;
+            xSemaphoreGive(txFrameBufSem);
+            
             // Wait until reset completes
             while (sh2HalResetting) {
                 vTaskDelay(1);
@@ -626,7 +605,7 @@ static void txTask(const void *params)
         if (txFrameLen > 0) {
             // Stuff needs to be sent.
 
-            if (!sh2Hal.dfuMode) {
+            if (!dfuMode) {
                 if (txFrameLen <= txBsnAvail) {
                     // BNO080 can take it now.
                     // Sending a frame erases what we knew from last BSN
@@ -647,18 +626,21 @@ static void txTask(const void *params)
             else {
                 // DFU Mode transmit
                 HAL_UART_Transmit(&huart1, txFrame, txFrameLen, HAL_MAX_DELAY);
+
+                // Transmit done, release the semaphore.
+                xSemaphoreGive(txFrameBufSem);
             }
         }
     }
 }
 
-static void bootn0(bool state)
+static void bootn(bool state)
 {
 	HAL_GPIO_WritePin(BOOTN_GPIO_PORT, BOOTN_GPIO_PIN, 
 	                  state ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
 
-static void rstn0(bool state)
+static void rstn(bool state)
 {
 	HAL_GPIO_WritePin(RSTN_GPIO_PORT, RSTN_GPIO_PIN, 
 	                  state ? GPIO_PIN_SET : GPIO_PIN_RESET);
