@@ -638,18 +638,15 @@ static void spiReset(bool dfuMode)
     
     HAL_SPI_Init(hspi);
     
-    if (dfuMode) {
-        // For some reason, SCLK is still in high state even after being
-        // configured to be low.  Doing one SPI operation with no CS
-        // asserted gets it in proper initial state.
-        uint8_t dummyTx[1];
-        uint8_t dummyRx[1];
-
-        memset(dummyTx, 0xAA, sizeof(dummyTx));
+    // We need to establish SCLK in proper initial state.
+    // Do one SPI operation with reset asserted and no CS asserted to get clock sorted.
+    uint8_t dummyTx[1];
+    uint8_t dummyRx[1];
+    
+    memset(dummyTx, 0xAA, sizeof(dummyTx));
         
-        dbgPulse(5);
-        HAL_SPI_TransmitReceive(hspi, dummyTx, dummyRx, sizeof(dummyTx), 1);
-    }
+    dbgPulse(5);
+    HAL_SPI_TransmitReceive(hspi, dummyTx, dummyRx, sizeof(dummyTx), 1);
 }           
 
 static int tx_dfu(uint8_t* pData, uint32_t len)
