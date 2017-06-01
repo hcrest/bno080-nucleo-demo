@@ -10,6 +10,7 @@
 /EWARM/sh2-demo-spi/
 /EWARM/sh2-demo-i2c/
 /EWARM/sh2-demo-uart/
+/EWARM/demo-rvc/
 /EWARM/sh2-demo Configuration/
 /EWARM/settings/
 /EWARM/sh2-demo.dep
