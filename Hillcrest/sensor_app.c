@@ -57,10 +57,9 @@ const float scaleDegToRad = 3.14159265358 / 180.0;
 
 // --- Forward declarations -------------------------------------------
 
-static void startReports(void);
 static void eventHandler(void * cookie, sh2_AsyncEvent_t *pEvent);
 static void sensorHandler(void * cookie, sh2_SensorEvent_t *pEvent);
-static void configure(void);
+static void onReset(void);
 
 #ifdef DSF_OUTPUT
     static void printDsfHeaders(void);
@@ -138,13 +137,8 @@ void demoTaskStart(const void * params)
     reportProdIds();
 #endif
 
-    // Configure some parameters of the BNO080:
-    // Gyro Integrated Rotation Vector prediction and dynamic
-    // calibration settings.
-    configure();
-            
-    // Enable reports from Rotation Vector.
-    startReports();
+    // Perform on-reset setup of BNO080
+    onReset();
 
     // Process sensors forever
     while (1) {
@@ -161,15 +155,7 @@ void demoTaskStart(const void * params)
 #endif
         }
         if (resetPerformed) {
-            resetPerformed = false;
-
-            // Configure some parameters of the BNO080:
-            // Gyro Integrated Rotation Vector prediction and dynamic
-            // calibration settings.
-            configure();
-            
-            // Enable reports from Rotation Vector.
-            startReports();
+            onReset();
         }
     }
 }
@@ -271,6 +257,18 @@ static void startReports(void)
     if (status != 0) {
         printf("Error while enabling sensor %d\n", sensorId);
     }
+}
+
+static void onReset(void)
+{
+    // Configure calibration config as we want it
+    configure();
+
+    // Start the flow of sensor reports
+    startReports();
+    
+    // Toggle reset flag back to false
+    resetPerformed = false;
 }
 
 #ifdef DSF_OUTPUT

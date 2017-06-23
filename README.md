@@ -39,14 +39,14 @@ reading and printing Rotation Vectors from the sensor hub:
 
 Hillcrest SH-2 Demo.
 SH2 Reset.
-Part 10003608 : Version 3.2.4 Build 283
-Part 10003606 : Version 1.2.3 Build 206
+Part 10003608 : Version 3.2.7 Build 370
+Part 10003606 : Version 1.2.4 Build 230
 Starting Sensor Reports.
-  0.3756 Rotation Vector: r:0.931 i:-0.013 j:0.014 k:-0.364 (acc: 180.001 deg)
-  0.3858 Rotation Vector: r:0.931 i:-0.013 j:0.014 k:-0.364 (acc: 180.001 deg)
-  0.3958 Rotation Vector: r:0.931 i:-0.013 j:0.014 k:-0.364 (acc: 180.001 deg)
-  0.4058 Rotation Vector: r:0.931 i:-0.013 j:0.014 k:-0.364 (acc: 180.001 deg)
-  0.4159 Rotation Vector: r:0.931 i:-0.013 j:0.014 k:-0.364 (acc: 180.001 deg)
+  0.3000 Rotation Vector: r:0.025 i:0.773 j:0.633 k:-0.039 (acc: 180.001 deg)
+  0.3099 Rotation Vector: r:0.025 i:0.773 j:0.633 k:-0.039 (acc: 180.001 deg)
+  0.3210 Rotation Vector: r:0.025 i:0.773 j:0.633 k:-0.039 (acc: 180.001 deg)
+  0.3305 Rotation Vector: r:0.025 i:0.773 j:0.633 k:-0.039 (acc: 180.001 deg)
+  0.3409 Rotation Vector: r:0.025 i:0.773 j:0.633 k:-0.039 (acc: 180.001 deg)
 .
 .
 .
