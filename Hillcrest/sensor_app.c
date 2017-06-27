@@ -183,6 +183,7 @@ static void sensorHandler(void * cookie, sh2_SensorEvent_t *pEvent)
 
 #define GIRV_REF_6AG  (0x0207)  // 6 axis Game Rotation Vector 
 #define GIRV_REF_9AGM (0x0204)  // 9 axis Absolute Rotation Vector
+#define GIRV_SYNC_INTERVAL (10000)                     // sync interval: 10000 uS (100Hz)
 #define GIRV_MAX_ERR FIX_Q(29, (30.0 * scaleDegToRad)) // max error: 30 degrees
 #define GIRV_ALPHA FIX_Q(20, 0.303072543909142)        // pred param alpha
 #define GIRV_BETA  FIX_Q(20, 0.113295896384921)        // pred param beta
@@ -190,11 +191,9 @@ static void sensorHandler(void * cookie, sh2_SensorEvent_t *pEvent)
 
 #ifdef CONFIGURE_HMD
     // Enable GIRV prediction for 28ms with 100Hz sync
-    #define GIRV_SYNC_INTERVAL (10000)                     // sync interval: 10000 uS (100Hz)
-    #define GIRV_PRED_AMT FIX_Q(10, 0.028)                 // prediction amt: 28ms
+    #define GIRV_PRED_AMT FIX_Q(10, 0.028)             // prediction amt: 28ms
 #else
     // Disable GIRV prediction
-    #define GIRV_SYNC_INTERVAL (0)                     // sync interval: 0 (disables prediction)
     #define GIRV_PRED_AMT FIX_Q(10, 0.0)               // prediction amt: 0
 #endif
 
@@ -203,7 +202,7 @@ static void configure(void)
 {
     int status = SH2_OK;
     uint32_t config[7];
-    
+
     // Note: The call to sh2_setFrs below updates a non-volatile FRS record
     // so it will remain in effect even after the sensor hub reboots.  It's not strictly
     // necessary to repeat this step every time the system starts up as we are doing
@@ -220,6 +219,7 @@ static void configure(void)
     config[5] = (uint32_t)GIRV_BETA;     // Beta
     config[6] = (uint32_t)GIRV_GAMMA;    // Gamma
     status = sh2_setFrs(GYRO_INTEGRATED_RV_CONFIG, config, ARRAY_LEN(config));
+    
     if (status != SH2_OK) {
         printf("Error: %d, from sh2_setFrs() in configure().\n", status);
     }
