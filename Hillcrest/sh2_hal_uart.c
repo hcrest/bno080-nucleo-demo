@@ -141,6 +141,7 @@ static void rxTask(const void *params);
 static void txTask(const void *params);
 static void rstn(bool state);
 static void bootn(bool state);
+static void ps0_waken(bool state);
 static void onRxCplt(UART_HandleTypeDef *huart);
 static void onRxTimer(TimerHandle_t t);
 static void rxResetFrame(void);
@@ -210,6 +211,12 @@ int sh2_hal_reset(bool _dfuMode,
 
     // Set BOOTN according to dfuMode
     bootn(!dfuMode);
+
+    // To boot in SHTP-UART mode, must have PS1=1, PS0=0.
+    // PS1 is set via jumper.
+    // PS0 will be 0 if PS0 jumper is 0 OR (PS1 jumper is 1 AND WAKEN sig is 0)
+    // So we set WAKEN signal to 0 just in case PS1 jumper is in 1 position.
+    ps0_waken(false);
 
     // Notify tasks that HAL is resetting
     sh2HalResetting = true;
@@ -643,6 +650,12 @@ static void bootn(bool state)
 static void rstn(bool state)
 {
 	HAL_GPIO_WritePin(RSTN_GPIO_PORT, RSTN_GPIO_PIN, 
+	                  state ? GPIO_PIN_SET : GPIO_PIN_RESET);
+}
+
+static void ps0_waken(bool state)
+{
+	HAL_GPIO_WritePin(WAKEN_GPIO_PORT, WAKEN_GPIO_PIN, 
 	                  state ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
 

@@ -29,8 +29,6 @@
 
 #include "sensor_app.h"
 #include "sh2.h"
-#include "shtp.h"
-#include "sh2_hal.h"
 #include "sh2_err.h"
 #include "sh2_SensorValue.h"
 
@@ -109,9 +107,6 @@ void demoTaskStart(const void * params)
         vTaskDelay(10);  // 10ms pause
     }
 #endif
-
-    // init SHTP layer
-    shtp_init();
 
     resetPerformed = false;
     startedReports = false;

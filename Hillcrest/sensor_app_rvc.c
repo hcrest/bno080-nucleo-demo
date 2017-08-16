@@ -45,6 +45,9 @@ const float scaleDegToRad = 3.14159265358 / 180.0;
 #define BOOTN_GPIO_PORT GPIOB
 #define BOOTN_GPIO_PIN  GPIO_PIN_5
 
+#define WAKEN_GPIO_PORT SH_WAKEN_GPIO_Port // from STM32Cube pin config via mxconstants.h
+#define WAKEN_GPIO_PIN  SH_WAKEN_Pin
+
 #define MAX_FRAME_LEN (19)         // Length of UART-RVC Frame
 #define RX_BUFFER_SIZE (64)        // Size of UART's DMA Buffer
 
@@ -71,6 +74,7 @@ const float scaleDegToRad = 3.14159265358 / 180.0;
 
 static void bootn(bool state);
 static void rstn(bool state);
+static void ps0(bool state);
 static void setupUsart(uint32_t baudrate);
 static void onRxCplt(UART_HandleTypeDef *huart);
 static void onRxTimer(TimerHandle_t t);
@@ -115,6 +119,11 @@ void demoTaskStart(const void * params)
     // Reset BNO080 (Deassert BOOTN)
     rstn(false);  // Hold in reset
     bootn(true);  // Don't enter DFU on boot
+
+    // For RVC mode, boot with PS0=1, PS1=0.
+    // So PS1 switch must be in 0 position, PS0 switch in 1 position
+    // AND PS0/Wake signal from host must be high.
+    ps0(true);    // Set PS0/Wake high
 
     // Start up UART
     setupUsart(UART_RVC_BAUDRATE);
@@ -184,6 +193,12 @@ static void bootn(bool state)
 static void rstn(bool state)
 {
 	HAL_GPIO_WritePin(RSTN_GPIO_PORT, RSTN_GPIO_PIN, 
+	                  state ? GPIO_PIN_SET : GPIO_PIN_RESET);
+}
+
+static void ps0(bool state)
+{
+	HAL_GPIO_WritePin(WAKEN_GPIO_PORT, WAKEN_GPIO_PIN, 
 	                  state ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
 
