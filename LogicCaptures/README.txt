@@ -1,0 +1,1 @@
+Please download the capture viewer from:  https://www.saleae.com/downloads to open these logic capture files.
