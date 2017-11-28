@@ -3934,6 +3934,9 @@
         <name>$PROJ_DIR$\..\Hillcrest\dbg.c</name>
       </file>
       <file>
+        <name>$PROJ_DIR$\..\Hillcrest\dfu_bno080.c</name>
+      </file>
+      <file>
         <name>$PROJ_DIR$\..\Hillcrest\firmware.c</name>
         <excluded>
           <configuration>demo-rvc</configuration>
@@ -3983,12 +3986,6 @@
     </group>
     <group>
       <name>SH2 Driver</name>
-      <file>
-        <name>$PROJ_DIR$\..\sh2\dfu.c</name>
-        <excluded>
-          <configuration>demo-rvc</configuration>
-        </excluded>
-      </file>
       <file>
         <name>$PROJ_DIR$\..\sh2\sh2.c</name>
         <excluded>

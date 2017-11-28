@@ -45,8 +45,11 @@
 // Define this to use HMD-appropriate configuration.
 // #define CONFIGURE_HMD
 
+// Define this for calibration config appropriate for Robot Vaccuum Cleaners
+// #define CONFIGURE_RVC
+
 #ifdef PERFORM_DFU
-#include "dfu.h"
+#include "dfu_bno080.h"
 #include "firmware.h"
 #endif
 
@@ -222,8 +225,13 @@ static void configure(void)
     // The sh2_setCalConfig does not update non-volatile storage.  This
     // only remains in effect until the sensor hub reboots.
 
+#ifdef CONFIGURE_RVC
+    // Enable planar calibration mode, which is designed for RVC applications
+    status = sh2_setCalConfig(SH2_CAL_PLANAR);
+#else
     // Enable dynamic calibration for A, G and M sensors
     status = sh2_setCalConfig(SH2_CAL_ACCEL | SH2_CAL_GYRO | SH2_CAL_MAG);
+#endif
     if (status != SH2_OK) {
         printf("Error: %d, from sh2_setCalConfig() in configure().\n", status);
     }
@@ -334,7 +342,7 @@ static void printDsf(const sh2_SensorEvent_t * event)
             break;
 
         case SH2_MAGNETIC_FIELD_CALIBRATED:
-            printf(".%d %0.6f, %d, %0.3f, %0.3f, %0.3f, %u\n",
+            printf(".%d %0.6f, %d, %0.6f, %0.6f, %0.6f, %u\n",
                    SH2_MAGNETIC_FIELD_CALIBRATED,
                    t,
                    lastSequence[value.sensorId],
@@ -346,7 +354,7 @@ static void printDsf(const sh2_SensorEvent_t * event)
             break;
         
         case SH2_ACCELEROMETER:
-            printf(".%d %0.6f, %d, %0.3f, %0.3f, %0.3f\n",
+            printf(".%d %0.6f, %d, %0.6f, %0.6f, %0.6f\n",
                    SH2_ACCELEROMETER,
                    t,
                    lastSequence[value.sensorId],
@@ -361,7 +369,7 @@ static void printDsf(const sh2_SensorEvent_t * event)
             j = value.un.rotationVector.j;
             k = value.un.rotationVector.k;
             acc_rad = value.un.rotationVector.accuracy;
-            printf(".%d %0.6f, %d, %0.3f, %0.3f, %0.3f, %0.3f, %0.3f\n",
+            printf(".%d %0.6f, %d, %0.6f, %0.6f, %0.6f, %0.6f, %0.6f\n",
                    SH2_ROTATION_VECTOR,
                    t,
                    lastSequence[value.sensorId],
@@ -404,7 +412,7 @@ static void reportProdIds(void)
     }
 
     // Report the results
-    for (int n = 0; n < SH2_NUM_PROD_ID_ENTRIES; n++) {
+    for (int n = 0; n < prodIds.numEntries; n++) {
         printf("Part %d : Version %d.%d.%d Build %d\n",
                prodIds.entry[n].swPartNumber,
                prodIds.entry[n].swVersionMajor, prodIds.entry[n].swVersionMinor, 
@@ -419,6 +427,7 @@ static void printEvent(const sh2_SensorEvent_t * event)
     float scaleRadToDeg = 180.0 / 3.14159265358;
     float r, i, j, k, acc_deg, x, y, z;
     float t;
+    static int skip = 0;
 
     rc = sh2_decodeSensorEvent(&value, event);
     if (rc != SH2_OK) {
@@ -449,23 +458,29 @@ static void printEvent(const sh2_SensorEvent_t * event)
             acc_deg = scaleRadToDeg * 
                 value.un.rotationVector.accuracy;
             printf("%8.4f Rotation Vector: "
-                   "r:%5.3f i:%5.3f j:%5.3f k:%5.3f (acc: %5.3f deg)\n",
+                   "r:%0.6f i:%0.6f j:%0.6f k:%0.6f (acc: %0.6f deg)\n",
                    t,
                    r, i, j, k, acc_deg);
             break;
         case SH2_GYRO_INTEGRATED_RV:
-            r = value.un.gyroIntegratedRV.real;
-            i = value.un.gyroIntegratedRV.i;
-            j = value.un.gyroIntegratedRV.j;
-            k = value.un.gyroIntegratedRV.k;
-            x = value.un.gyroIntegratedRV.angVelX;
-            y = value.un.gyroIntegratedRV.angVelY;
-            z = value.un.gyroIntegratedRV.angVelZ;
-            printf("%8.4f Gyro Integrated RV: "
-                   "r:%5.3f i:%5.3f j:%5.3f k:%5.3f x:%5.3f y:%5.3f z:%5.3f\n",
-                   t,
-                   r, i, j, k,
-                   x, y, z);
+            // These come at 1kHz, too fast to print all of them.
+            // So only print every 10th one
+            skip++;
+            if (skip == 10) {
+                skip = 0;
+                r = value.un.gyroIntegratedRV.real;
+                i = value.un.gyroIntegratedRV.i;
+                j = value.un.gyroIntegratedRV.j;
+                k = value.un.gyroIntegratedRV.k;
+                x = value.un.gyroIntegratedRV.angVelX;
+                y = value.un.gyroIntegratedRV.angVelY;
+                z = value.un.gyroIntegratedRV.angVelZ;
+                printf("%8.4f Gyro Integrated RV: "
+                       "r:%0.6f i:%0.6f j:%0.6f k:%0.6f x:%0.6f y:%0.6f z:%0.6f\n",
+                       t,
+                       r, i, j, k,
+                       x, y, z);
+            }
             break;
         default:
             printf("Unknown sensor: %d\n", value.sensorId);

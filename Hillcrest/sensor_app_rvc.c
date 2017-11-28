@@ -278,7 +278,7 @@ static void processFrame(void)
     float acc_y_g =   0.001 * (int16_t)((rxFrame[RVC_ACC_Y_MSB] << 8) + rxFrame[RVC_ACC_Y_LSB]);
     float acc_z_g =   0.001 * (int16_t)((rxFrame[RVC_ACC_Z_MSB] << 8) + rxFrame[RVC_ACC_Z_LSB]);
 
-    printf("%3d : yaw:%0.2f pitch:%0.2f roll:%0.2f ax:%0.2f ay:%0.2f az:%0.2f\n",
+    printf("%3d : yaw:%0.2f pitch:%0.2f roll:%0.2f ax:%0.3f ay:%0.3f az:%0.3f\n",
            index, yaw_deg, pitch_deg, roll_deg, acc_x_g, acc_y_g, acc_z_g);
 }
 

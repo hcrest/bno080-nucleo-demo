@@ -503,7 +503,7 @@ static void rxCharShtp(uint8_t c)
             }
             break;
         case ESCAPED:
-            rxAddToFrame(c);
+            rxAddToFrame(c ^ 0x20);
             rxState = INSIDE_FRAME;
             break;
         default:
@@ -540,7 +540,7 @@ static void rxTask(const void *params)
 
             // Wait for reset period to end
             while (sh2HalResetting) {
-                vTaskDelay(1);
+                vTaskDelay(0);
             }
 
             // Restart receive process
@@ -571,12 +571,25 @@ static void rxTask(const void *params)
     }
 }
 
+static void delay100uS(void)
+{
+    volatile uint32_t n;
+
+    // This wastes 100uS of this task's time while allowing other tasks to run.
+    // If other tasks do run, the delay will be greater than 100uS.  That's OK.
+    // count of 28 : 57uS
+    // count of 56 : 109uS
+    for (n = 0; n < 56; n++) {
+        vTaskDelay(0);
+    }
+}
+
 void sendBuffer(const uint8_t *pData, uint32_t len)
 {
     // Send data 1 byte at a time with 1ms delays.
     // (SHTP spec calls for 100uS delay minimum)
     for (unsigned n = 0; n < len; n++) {
-        vTaskDelay(1);
+        delay100uS();
         
         if (sh2HalResetting) {
             // Stop in the middle of buffer if reset occurs.
@@ -604,7 +617,7 @@ static void txTask(const void *params)
             
             // Wait until reset completes
             while (sh2HalResetting) {
-                vTaskDelay(1);
+                vTaskDelay(0);
             }
         }
 
@@ -683,7 +696,7 @@ static uint32_t rfc1662Encode(uint8_t *buf, uint32_t bufLen,
 
             // Add escaped data to buffer
             buf[encLen++] = RFC1662_ESCAPE;
-            buf[encLen++] = pData[n];
+            buf[encLen++] = pData[n] ^ 0x20;
         }
         else {
             // If overflowed, return error

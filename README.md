@@ -51,3 +51,9 @@ Starting Sensor Reports.
 .
 .
 ```
+
+## Saleae Logic Analyzer Captures
+
+In the LogicCaptures folder, there are example logic analyzer traces of the
+BNO080's operation with I2C, SPI and UART connections.  See the README.txt
+file located there, for instructions on downloading the viewer application.
