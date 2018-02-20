@@ -32,6 +32,10 @@
 #include "sh2_err.h"
 #include "sh2_SensorValue.h"
 
+// Number of sensor events that can be queued before dropping data.
+// A good value would be twice the number of sensors enabled by the app.
+#define SENSOR_EVENT_QUEUE_SIZE (6)
+
 #ifndef ARRAY_LEN
 #define ARRAY_LEN(a) (sizeof(a)/sizeof(a[0]))
 #endif
@@ -83,9 +87,7 @@ SemaphoreHandle_t wakeSensorTask;
 volatile bool resetPerformed = false;
 volatile bool startedReports = false;
 
-volatile bool sensorReceived = false;
-sh2_SensorEvent_t sensorEvent;
-
+QueueHandle_t eventQueue;
 
 // --- Public methods -------------------------------------------------
 
@@ -93,10 +95,16 @@ sh2_SensorEvent_t sensorEvent;
 void demoTaskStart(const void * params)
 {
     static uint32_t sensors = 0;
+    sh2_SensorEvent_t sensorEvent;
 
     printf("\n\nHillcrest SH-2 Demo.\n");
 
     wakeSensorTask = xSemaphoreCreateBinary();
+    eventQueue = xQueueCreate(SENSOR_EVENT_QUEUE_SIZE,
+                              sizeof(sh2_SensorEvent_t));
+    if (eventQueue == NULL) {
+        printf("Error creating event queue.\n");
+    }
 
 #ifdef PERFORM_DFU
     // Perform DFU
@@ -143,8 +151,8 @@ void demoTaskStart(const void * params)
         // Wait until something happens
         xSemaphoreTake(wakeSensorTask, portMAX_DELAY);
                              
-        if (sensorReceived) {
-            sensorReceived = false;
+        // Dequeue sensor events
+        while (xQueueReceive(eventQueue, &sensorEvent, 0) == pdPASS) {
             sensors++;
 #ifdef DSF_OUTPUT
             printDsf(&sensorEvent);
@@ -152,6 +160,7 @@ void demoTaskStart(const void * params)
             printEvent(&sensorEvent);
 #endif
         }
+
         if (resetPerformed) {
             onReset();
         }
@@ -173,9 +182,7 @@ static void eventHandler(void * cookie, sh2_AsyncEvent_t *pEvent)
 
 static void sensorHandler(void * cookie, sh2_SensorEvent_t *pEvent)
 {
-    sensorEvent = *pEvent;
-    sensorReceived = true;
-
+    xQueueSend(eventQueue, pEvent, 0);
     xSemaphoreGive(wakeSensorTask);
 }
 
@@ -279,16 +286,31 @@ static void printDsfHeaders(void)
 {
     printf("+%d TIME[x]{s}, SAMPLE_ID[x]{samples}, ANG_POS_GLOBAL[rijk]{quaternion}, ANG_POS_ACCURACY[x]{rad}\n",
            SH2_ROTATION_VECTOR);
+    
+    printf("+%d TIME[x]{s}, SAMPLE_ID[x]{samples}, GAME_ROTATION_VECTOR[rijk]{quaternion}\n",
+           SH2_GAME_ROTATION_VECTOR);
+    
     printf("+%d TIME[x]{s}, SAMPLE_ID[x]{samples}, RAW_ACCELEROMETER[xyz]{adc units}\n",
            SH2_RAW_ACCELEROMETER);
+    
     printf("+%d TIME[x]{s}, SAMPLE_ID[x]{samples}, RAW_MAGNETOMETER[xyz]{adc units}\n",
            SH2_RAW_MAGNETOMETER);
+    
     printf("+%d TIME[x]{s}, SAMPLE_ID[x]{samples}, RAW_GYROSCOPE[xyz]{adc units}\n",
            SH2_RAW_GYROSCOPE);
+    
+    printf("+%d TIME[x]{s}, SAMPLE_ID[x]{samples}, GYROSCOPE_CALIBRATED[xyz]{rad/s}\n",
+           SH2_GYROSCOPE_CALIBRATED);
+    
+    printf("+%d TIME[x]{s}, SAMPLE_ID[x]{samples}, GYROSCOPE_UNCALIBRATED[xyz]{rad/s}\n",
+           SH2_GYROSCOPE_UNCALIBRATED);
+    
     printf("+%d TIME[x]{s}, SAMPLE_ID[x]{samples}, ACCELEROMETER[xyz]{m/s^2}\n",
            SH2_ACCELEROMETER);
+    
     printf("+%d TIME[x]{s}, SAMPLE_ID[x]{samples}, MAG_FIELD[xyz]{uTesla}, STATUS[x]{enum}\n",
            SH2_MAGNETIC_FIELD_CALIBRATED);
+    
     printf("+%d TIME[x]{s}, ANG_VEL_GYRO_RV[xyz]{rad/s}, ANG_POS_GYRO_RV[wxyz]{quaternion}\n",
            SH2_GYRO_INTEGRATED_RV);
 }
@@ -341,6 +363,26 @@ static void printDsf(const sh2_SensorEvent_t * event)
                    value.un.rawGyroscope.z);
             break;
 
+        case SH2_GYROSCOPE_CALIBRATED:
+            printf(".%d %0.6f, %d, %0.6f, %0.6f, %0.6f\n",
+                   SH2_GYROSCOPE_CALIBRATED,
+                   t,
+                   lastSequence[value.sensorId],
+                   value.un.gyroscope.x,
+                   value.un.gyroscope.y,
+                   value.un.gyroscope.z);
+            break;
+
+        case SH2_GYROSCOPE_UNCALIBRATED:
+            printf(".%d %0.6f, %d, %0.6f, %0.6f, %0.6f\n",
+                   SH2_GYROSCOPE_UNCALIBRATED,
+                   t,
+                   lastSequence[value.sensorId],
+                   value.un.gyroscopeUncal.x,
+                   value.un.gyroscopeUncal.y,
+                   value.un.gyroscopeUncal.z);
+            break;
+
         case SH2_MAGNETIC_FIELD_CALIBRATED:
             printf(".%d %0.6f, %d, %0.6f, %0.6f, %0.6f, %u\n",
                    SH2_MAGNETIC_FIELD_CALIBRATED,
@@ -376,7 +418,19 @@ static void printDsf(const sh2_SensorEvent_t * event)
                    r, i, j, k,
                    acc_rad);
             break;
-        
+
+        case SH2_GAME_ROTATION_VECTOR:
+            r = value.un.rotationVector.real;
+            i = value.un.rotationVector.i;
+            j = value.un.rotationVector.j;
+            k = value.un.rotationVector.k;
+            printf(".%d %0.6f, %d, %0.6f, %0.6f, %0.6f, %0.6f\n",
+                   SH2_ROTATION_VECTOR,
+                   t,
+                   lastSequence[value.sensorId],
+                   r, i, j, k);
+            break;
+            
         case SH2_GYRO_INTEGRATED_RV:
             angVelX = value.un.gyroIntegratedRV.angVelX;
             angVelY = value.un.gyroIntegratedRV.angVelY;
@@ -461,6 +515,34 @@ static void printEvent(const sh2_SensorEvent_t * event)
                    "r:%0.6f i:%0.6f j:%0.6f k:%0.6f (acc: %0.6f deg)\n",
                    t,
                    r, i, j, k, acc_deg);
+            break;
+        case SH2_GAME_ROTATION_VECTOR:
+            r = value.un.gameRotationVector.real;
+            i = value.un.gameRotationVector.i;
+            j = value.un.gameRotationVector.j;
+            k = value.un.gameRotationVector.k;
+            printf("%8.4f GRV: "
+                   "r:%0.6f i:%0.6f j:%0.6f k:%0.6f\n",
+                   t,
+                   r, i, j, k);
+            break;
+        case SH2_GYROSCOPE_CALIBRATED:
+            x = value.un.gyroscope.x;
+            y = value.un.gyroscope.y;
+            z = value.un.gyroscope.z;
+            printf("%8.4f GYRO: "
+                   "x:%0.6f y:%0.6f z:%0.6f\n",
+                   t,
+                   x, y, z);
+            break;
+        case SH2_GYROSCOPE_UNCALIBRATED:
+            x = value.un.gyroscopeUncal.x;
+            y = value.un.gyroscopeUncal.y;
+            z = value.un.gyroscopeUncal.z;
+            printf("%8.4f GYRO_UNCAL: "
+                   "x:%0.6f y:%0.6f z:%0.6f\n",
+                   t,
+                   x, y, z);
             break;
         case SH2_GYRO_INTEGRATED_RV:
             // These come at 1kHz, too fast to print all of them.
