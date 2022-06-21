@@ -1,3 +1,12 @@
+# NOTICE: Obsolete Code
+
+This repository is no longer maintained.
+
+The currently supported driver for the BNO080 and related SH2 sensor
+hubs can be found at https://github.com/ceva-dsp/sh2.  And an example
+project that demonstrates these modules and their driver are at
+https://github.com/ceva-dsp/sh2-demo-nucleo.
+
 # Example Application for Hillcrest BNO080 Development Kit
 
 This repository contains the example application for the Hillcrest
